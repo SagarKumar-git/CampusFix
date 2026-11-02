@@ -1,0 +1,115 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        brand: {
+          50:  '#eef2ff',
+          100: '#e0e7ff',
+          200: '#c7d2fe',
+          500: '#6366f1',
+          600: '#4f46e5',
+          700: '#4338ca',
+          800: '#3730a3',
+          900: '#312e81',
+        },
+        neutral: {
+          25:  '#fcfdfd',
+          50:  '#f8fafc',
+          100: '#f1f5f9',
+          200: '#e2e8f0',
+          300: '#cbd5e1',
+          400: '#94a3b8',
+          500: '#64748b',
+          600: '#475569',
+          700: '#334155',
+          800: '#1e293b',
+          900: '#0f172a',
+        },
+        status: {
+          submitted: {
+            bg:     '#eff6ff',
+            text:   '#1d4ed8',
+            border: '#bfdbfe',
+            dot:    '#3b82f6',
+          },
+          assigned: {
+            bg:     '#fef3c7',
+            text:   '#92400e',
+            border: '#fde68a',
+            dot:    '#f59e0b',
+          },
+          in_progress: {
+            bg:     '#f3e8ff',
+            text:   '#6b21a8',
+            border: '#e9d5ff',
+            dot:    '#a855f7',
+          },
+          resolved: {
+            bg:     '#ecfdf5',
+            text:   '#065f46',
+            border: '#a7f3d0',
+            dot:    '#10b981',
+          },
+          rejected: {
+            bg:     '#fef2f2',
+            text:   '#991b1b',
+            border: '#fecaca',
+            dot:    '#ef4444',
+          },
+          cancelled: {
+            bg:     '#f1f5f9',
+            text:   '#334155',
+            border: '#cbd5e1',
+            dot:    '#64748b',
+          },
+        },
+        priority: {
+          low: {
+            bg:     '#f8fafc',
+            text:   '#334155',
+            border: '#cbd5e1',
+            badge:  '#475569',
+          },
+          medium: {
+            bg:     '#f0fdf4',
+            text:   '#166534',
+            border: '#bbf7d0',
+            badge:  '#22c55e',
+          },
+          high: {
+            bg:     '#fff7ed',
+            text:   '#9a3412',
+            border: '#fed7aa',
+            badge:  '#f97316',
+          },
+          critical: {
+            bg:     '#fef2f2',
+            text:   '#991b1b',
+            border: '#fecaca',
+            badge:  '#ef4444',
+          },
+        },
+        feedback: {
+          errorBg:      '#fef2f2',
+          errorText:    '#991b1b',
+          errorBorder:  '#f87171',
+          warningBg:    '#fffbeb',
+          warningText:  '#92400e',
+          warningBorder:'#fcd34d',
+          successBg:    '#ecfdf5',
+          successText:  '#065f46',
+          successBorder:'#6ee7b7',
+          infoBg:       '#eff6ff',
+          infoText:     '#1e40af',
+          infoBorder:   '#93c5fd',
+        },
+      },
+    },
+  },
+  plugins: [],
+};
