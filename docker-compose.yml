@@ -1,0 +1,111 @@
+# ==============================================================================
+# CampusFix — Local Integration & Development Docker Compose Orchestration
+# ==============================================================================
+# Multi-container local orchestration for end-to-end integration testing.
+#
+# Services:
+#   1. postgres: PostgreSQL 15 database bound to internal network and localhost only.
+#   2. backend: FastAPI REST API service with /healthz and /readyz probes.
+#   3. frontend: Nginx container serving compiled React SPA with SPA routing.
+#
+# Operational & Security Policies:
+#   - PostgreSQL is bound strictly to 127.0.0.1 (not exposed publicly to 0.0.0.0).
+#   - Database migrations do NOT run automatically at container startup.
+#   - Migrations are run manually using:
+#       docker compose run --rm backend alembic upgrade head
+# ==============================================================================
+
+services:
+  # ----------------------------------------------------------------------------
+  # PostgreSQL 15 Database Service
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: campusfix-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-campusfix_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-campusfix_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-campusfix}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      # Bound strictly to loopback interface on host to prevent public network exposure
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - campusfix-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-campusfix_user} -d ${POSTGRES_DB:-campusfix}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # ----------------------------------------------------------------------------
+  # Backend API Service (FastAPI + Async SQLAlchemy)
+  # ----------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: campusfix-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-campusfix_user}:${POSTGRES_PASSWORD:-campusfix_dev_password}@postgres:5432/${POSTGRES_DB:-campusfix}
+      SECRET_KEY: ${SECRET_KEY:-placeholder_secret_key_minimum_64_hex_chars_for_development_only0000}
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 15
+      REFRESH_TOKEN_EXPIRE_DAYS: 7
+      ALLOWED_ORIGINS: http://localhost:8080,http://127.0.0.1:8080,http://localhost:5173
+      LOG_LEVEL: INFO
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      - campusfix-internal
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # ----------------------------------------------------------------------------
+  # Frontend Static Web Server & API Gateway (Nginx + React SPA)
+  # ----------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+    container_name: campusfix-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      - campusfix-internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+# ------------------------------------------------------------------------------
+# Networks & Volumes
+# ------------------------------------------------------------------------------
+networks:
+  campusfix-internal:
+    name: campusfix-internal
+    driver: bridge
+
+volumes:
+  postgres_data:
+    name: campusfix-postgres-data

@@ -1,0 +1,50 @@
+# ==============================================================================
+# CampusFix — Backend Docker Ignore Rules
+# ==============================================================================
+
+# Secrets and environment files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.pfx
+*.p12
+
+# Virtual environments
+.venv
+.venv/
+venv/
+env/
+ENV/
+
+# Python bytecode and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Python testing, linters and coverage caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+tests/
+
+# Documentation and operational guides
+docs/
+
+# Git and OS metadata
+.git/
+.gitignore
+.gitattributes
+.DS_Store
+Thumbs.db
+*.log

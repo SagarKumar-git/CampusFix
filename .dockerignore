@@ -1,0 +1,57 @@
+# ==============================================================================
+# CampusFix — Root Docker Ignore Rules
+# ==============================================================================
+
+# Secrets and environment files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.pfx
+*.p12
+
+# Virtual environments & node modules
+.venv/
+venv/
+env/
+ENV/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.vite/
+
+# Python bytecode and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Testing and tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+tests/
+frontend/tests/
+frontend/coverage/
+.eslintcache
+
+# Documentation
+docs/
+
+# Git and OS metadata
+.git/
+.gitignore
+.gitattributes
+.DS_Store
+Thumbs.db
+*.log

@@ -5,13 +5,16 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_db
 from app.api.v1 import api_v1_router
 from app.core.config import settings
 from app.core.database import close_db_engine
@@ -116,6 +119,55 @@ def create_app() -> FastAPI:
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content=content,
         )
+
+    # Mount operational health probes
+    @app.get(
+        "/healthz",
+        tags=["system"],
+        summary="Liveness Probe",
+        status_code=status.HTTP_200_OK,
+    )
+    async def liveness_probe() -> dict[str, str]:
+        """Returns HTTP 200 if the web application process is responsive."""
+        return {"status": "healthy"}
+
+    @app.get(
+        "/readyz",
+        tags=["system"],
+        summary="Readiness Probe",
+        status_code=status.HTTP_200_OK,
+        responses={
+            status.HTTP_200_OK: {
+                "description": "Database is connected and application is ready",
+                "content": {
+                    "application/json": {"example": {"status": "ready", "database": "connected"}}
+                },
+            },
+            status.HTTP_503_SERVICE_UNAVAILABLE: {
+                "description": "Database is unreachable or degraded",
+                "content": {
+                    "application/json": {
+                        "example": {"status": "unhealthy", "database": "unreachable"}
+                    }
+                },
+            },
+        },
+    )
+    async def readiness_probe(
+        db: Annotated[AsyncSession, Depends(get_db)],
+    ) -> JSONResponse:
+        """Executes a lightweight query to verify database connectivity."""
+        try:
+            await db.execute(text("SELECT 1"))
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={"status": "ready", "database": "connected"},
+            )
+        except Exception:
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={"status": "unhealthy", "database": "unreachable"},
+            )
 
     # Mount API routers
     app.include_router(api_v1_router)

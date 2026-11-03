@@ -158,3 +158,30 @@ export const RoleBadge: React.FC<RoleBadgeProps> = ({ role, className = '' }) =>
     </span>
   );
 };
+
+export interface ActiveStatusBadgeProps {
+  isActive: boolean;
+  className?: string;
+}
+
+export const ActiveStatusBadge: React.FC<ActiveStatusBadgeProps> = ({
+  isActive,
+  className = '',
+}) => {
+  return isActive ? (
+    <span
+      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 ${className}`}
+    >
+      <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" aria-hidden="true" />
+      <span>ACTIVE</span>
+    </span>
+  ) : (
+    <span
+      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-neutral-100 text-neutral-600 border border-neutral-300 ${className}`}
+    >
+      <span className="w-1.5 h-1.5 rounded-full bg-neutral-400" aria-hidden="true" />
+      <span>INACTIVE</span>
+    </span>
+  );
+};
+

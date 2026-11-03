@@ -19,6 +19,7 @@ import LoginPage from './pages/auth/LoginPage';
 import RegisterPage from './pages/auth/RegisterPage';
 import StudentTicketsPage from './pages/student/StudentTicketsPage';
 import StaffQueuePage from './pages/staff/StaffQueuePage';
+import CategoryManagementPage from './pages/admin/CategoryManagementPage';
 import TicketCreatePage from './pages/tickets/TicketCreatePage';
 import TicketDetailPage from './pages/tickets/TicketDetailPage';
 
@@ -44,7 +45,7 @@ export const RootRedirect: React.FC = () => {
   }
 
   if (user.role === 'STAFF') return <Navigate to="/staff/queue" replace />;
-  if (user.role === 'ADMINISTRATOR') return <Navigate to="/admin/dashboard" replace />;
+  if (user.role === 'ADMINISTRATOR') return <Navigate to="/admin/categories" replace />;
   return <Navigate to="/student/tickets" replace />;
 };
 
@@ -72,6 +73,12 @@ export const AppContent: React.FC = () => {
           {/* Staff Workbench Queue */}
           <Route element={<RoleRoute allowedRoles={['STAFF']} />}>
             <Route path="/staff/queue" element={<StaffQueuePage />} />
+          </Route>
+
+          {/* Administrator Category Management Console */}
+          <Route element={<RoleRoute allowedRoles={['ADMINISTRATOR']} />}>
+            <Route path="/admin/categories" element={<CategoryManagementPage />} />
+            <Route path="/admin/dashboard" element={<Navigate to="/admin/categories" replace />} />
           </Route>
 
           {/* Ticket Detail View (all authenticated roles) */}

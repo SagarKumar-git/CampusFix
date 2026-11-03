@@ -1,22 +1,304 @@
 # Project Status & Phase-Gate Tracking — CampusFix
 
-| Document Version | 2.12.0 |
+| Document Version | 3.7.0 |
 | :--- | :--- |
-| **Current Active Phase** | **Phase 4: Client Interfaces (Student, Staff, Admin) & API Integration** |
-| **Active Checkpoint** | **Checkpoint 4.5: Staff Workbench Queue and Work Execution — Complete** |
-| **Phase 4 Gate Status** | **Checkpoint 4.5 Complete — Awaiting Project Owner Authorization for Checkpoint 4.6 (Category Management Console)** |
+| **Current Active Phase** | **Phase 5: Deployment, Operational Runbooks & Release Engineering** |
+| **Phase 4 Status** | **Phase 4 (Checkpoints 4.1 – 4.7) Formally Closed & Signed Off** |
+| **Phase 5 Status** | **Phase 5.5 Formally Signed Off — Phase 5.6 Staging Deployment & Smoke-Testing Plan Prepared** |
+| **Next Planned Step** | **Phase 5.6: Pilot Staging Deployment & Live End-to-End Smoke Test (Awaiting Owner Approval)** |
 | **Maintainer** | Project Lead & Software Architect |
-| **Last Updated** | 2026-11-02 (UTC) |
+| **Last Updated** | 2026-11-03 (UTC) |
 
 ---
 
 ## 1. Executive Status Summary
 
-Phase 0 (Requirements & Architecture), Phase 1 (UI/UX Design, Design System & Wireframe Specifications), Phase 2 (Repository Foundations, Tooling, Database Connectivity & Migrations), and Phase 3 (Core Domain Models, Auth Engine, Ticket State Machine & REST APIs) have been fully completed, reviewed, and audited.
+Phase 0 (Requirements & Architecture), Phase 1 (UI/UX Design, Design System & Wireframe Specifications), Phase 2 (Repository Foundations, Tooling, Database Connectivity & Migrations), Phase 3 (Core Domain Models, Auth Engine, Ticket State Machine & REST APIs), and Phase 4 (Client Interfaces & Frontend Integration) have been completed, audited, and verified.
 
-The Project Owner formally authorized execution of **Phase 4, Checkpoint 4.5: Staff Workbench Queue and Work Execution**.
+In Phase 5, **Checkpoint 5.1 (Health Check Probes)**, **Checkpoint 5.2 (Production Docker & Container Configuration)**, **Checkpoint 5.3 (Same-Origin Reverse Proxy & Edge Routing Architecture)**, **Checkpoint 5.4 (Production PostgreSQL Readiness & Migration Planning)**, and **Checkpoint 5.5 (Secure Initial Administrator Provisioning CLI)** have been completed and verified.
 
-**Checkpoint 4.5 Status**: **Complete**.
+---
+
+### Phase 5.5: Secure Initial Administrator Provisioning CLI *(Formally Signed Off)*
+- **Formal Sign-off & Audit Outcome**:
+  - **Project Owner Approval**: **Formally Signed Off & Approved**.
+  - **Final Read-Only Verification Audit Verdict**: **PASS** (100% compliant across all 13 security and authorization audit items).
+- **Security Audit History & Remediation Summary**:
+  - *Original Findings*: A read-only security audit identified unapproved convenience capabilities (`--update-password`, `-y` / `--yes`, and `ADMIN_INITIAL_PASSWORD`), missing TTY enforcement, and potential profile field overwrites during promotion.
+  - *Security Corrections Completed*:
+    1. **Removed `--update-password`**: Existing active administrators are strictly immutable under this CLI. No password overwrite path remains.
+    2. **Removed `-y` and `--yes`**: Automated or non-interactive confirmation bypasses were deleted.
+    3. **Removed `ADMIN_INITIAL_PASSWORD`**: Plaintext credentials cannot be supplied via environment variables or command-line arguments. Masked double-entry input via `getpass.getpass()` is mandatory.
+    4. **Enforced Interactive Promotion Rules**: Promotion of existing `STUDENT` or `STAFF` accounts is refused by default (`REFUSED`). Promotion requires `--promote-existing` AND an interactive TTY (`sys.stdin.isatty()`) confirmation where the operator must type **exactly `yes`**. Any other response (`y`, `YES`, `Yes`, empty string, EOF) cancels immediately.
+    5. **Profile Field Preservation**: During confirmed promotion, **only the role field** (`existing_user.role = UserRole.ADMINISTRATOR.value`) is modified. Full name, email, password hash, and active status remain strictly preserved.
+    6. **Database Target Safety Guards**: Before any database interaction, the CLI displays the environment name and masked database target (`Settings.masked_database_url`). Execution is immediately blocked if `ENVIRONMENT=production` or if the database host is remote (non-loopback); targeting production/remote databases requires separate explicit project-owner approval without bypass flags.
+    7. **Guaranteed Engine Disposal**: Database engine disposal (`close_db_engine()`) is guaranteed in a `finally` block on all execution paths (success, failure, or unhandled exception).
+    8. **Sanitized Error Messaging**: Database exceptions return generic failure messages (`"Database transaction failed."`) preventing raw SQL or query parameter leakage.
+- **Dedicated Provisioning Test Suite (`backend/tests/unit/test_bootstrap_admin.py`)**:
+  - **37 dedicated unit tests**: **37 / 37 passed in 1.11s**.
+  - Complete coverage: password complexity/blacklist rules (10 tests), secrecy/no-leak (1 test), prompt mismatch & env var rejection (2 tests), parser flag rejection for `--update-password`, `-y`, `--yes`, `--force`, `--skip-confirmation` (6 tests), creation with Argon2id (1 test), existing administrator full immutability (1 test), default promotion refusal (1 test), profile field preservation (1 test), non-TTY blocking & exact `'yes'` matching (9 tests), transaction rollback (1 test), engine disposal lifecycle (1 test), and database target safety guards (3 tests).
+- **Comprehensive Quality Gate Metrics**:
+  - Backend pytest suite: **319 / 319 passed in 4.56s** (100% passing, 0 failed, 0 skipped).
+  - Frontend Vitest suite: **139 / 139 passed in 11.40s** across 21 test files (100% passing).
+  - Code hygiene: `ruff check backend` clean (0 errors), `ruff format --check backend` clean (55 files).
+- **Strict Scope Boundaries Maintained**:
+  - Zero execution against production database.
+  - Zero database schema or migration modifications.
+  - Zero new dependencies added.
+  - Application code frozen; ready for Phase 5.6 staging deployment execution.
+
+---
+
+### Phase 5.4: Production PostgreSQL Readiness & Migration Planning *(Completed)*
+- **Managed PostgreSQL Evaluation**:
+  - Conducted comparative technical and cost analysis across Neon Serverless PostgreSQL, Render Managed PostgreSQL, and AWS RDS PostgreSQL.
+  - Recommended **Neon Serverless PostgreSQL** for initial pilot/MVP due to zero-cost dev tier ($0/mo), continuous WAL archiving with 7-day PITR, instant zero-copy database branching for migration verification, and built-in connection pooling.
+  - Formulated cost projections: $0/mo (dev/pilot) scaling to $19/mo (Neon Launch) or $20/mo (Render Standard).
+- **Database Configuration & Driver Security Audit**:
+  - Verified `postgresql+asyncpg://` protocol enforcement, URL password normalization, and SSL connection requirement (`?ssl=require`).
+  - Audited connection pool settings: `pool_size=10`, `max_overflow=20`, `pool_timeout=30.0s`, `pool_recycle=1800s`, `pool_pre_ping=True` (safe for cloud NAT timeouts).
+  - Confirmed `ALEMBIC_DATABASE_URL` override injection and `pool.NullPool` usage in `backend/alembic/env.py`.
+- **Production Migration & Disaster Recovery Protocol**:
+  - Baseline revision: `0c98aec98ce5` (`create_initial_schema`) creates 5 tables, 10 indexes, and all check constraints.
+  - Upgrades executed strictly as an isolated pre-cutover **Release Phase command** (`alembic upgrade head`); zero automatic startup migrations.
+  - Post-migration health verification via `GET /readyz` (executes `SELECT 1`).
+  - Documented strict prohibition of production `alembic downgrade` (destructive data loss) in favor of snapshot/PITR instance restoration.
+- **Initial Administrator Bootstrapping Design**:
+  - Authored architectural specification for `app.scripts.bootstrap_admin`.
+  - Enforces zero default passwords, masked interactive password entry or secure deployment env var, minimum 12-char complexity, Argon2id hashing, and idempotent execution.
+- **Strict Scope Boundaries Maintained**:
+  - Zero database resources provisioned, zero accounts registered, zero production migrations executed.
+
+---
+
+### Phase 5.3: Same-Origin Reverse Proxy & Edge Routing Architecture *(Completed)*
+- **Architecture Overview**:
+  - Unifies React Single Page Application and FastAPI REST API under a single browser origin.
+  - Eliminates Cross-Site Cookie Attenuation without weakening authentication cookies or requiring third-party cookie permissions.
+  - Refresh token cookie strictly preserves `HttpOnly=True`, `Path=/api/v1/auth`, `SameSite=Lax`, and production `Secure=True`.
+- **Containerized Gateway Implementation (`frontend/nginx.conf`)**:
+  - Configured Nginx to act as the primary same-origin reverse proxy and SPA static file server.
+  - Defines `upstream backend_api { server backend:8000; keepalive 32; }`.
+  - Proxies `/api/` directly to FastAPI backend, preserving the complete `$request_uri` path without rewriting.
+  - Forwards standard identity headers (`Host`, `X-Real-IP`, `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host`, `X-Forwarded-Port`).
+  - Preserves `Set-Cookie` and `Cookie` headers without truncation or attenuation (`proxy_pass_header Set-Cookie;`).
+  - Routes operational probes (`/healthz` and `/readyz`) directly to backend service.
+  - Configures buffer sizes (128k/256k) for JWT payloads and RFC 7807 problem details.
+- **Serverless Edge Rewrites (`frontend/vercel.json`)**:
+  - Prepared edge rewrite configuration for serverless CDN deployments.
+  - Maps `/api/:path*` to backend destination, `/healthz` and `/readyz` to backend probes, and `/(.*)` to `/index.html`.
+  - Inlines strict security headers (`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`).
+- **Frontend Client Alignment**:
+  - Updated `frontend/Dockerfile`, `docker-compose.yml`, and `.env.docker.example` default `VITE_API_BASE_URL` to relative path `/api/v1`.
+  - When running in the browser, `ApiClient` automatically dispatches requests to `window.location.origin + '/api/v1'`, providing native same-origin execution across local and production domains.
+- **Quality Verification**:
+  - Frontend Vitest suite: **139 / 139 passed** across 21 test files.
+  - Backend regression suite: **282 / 282 passed**.
+  - Code hygiene: `ruff check` and `ruff format` 100% clean.
+
+---
+
+### Phase 5.2: Production Docker & Container Configuration *(Completed)*
+- **Backend Production Container (`backend/Dockerfile`)**:
+  - Multi-stage build based on official `python:3.11-slim`.
+  - Stage 1 (Builder): Installs minimal build tools, creates `/opt/venv`, and pre-compiles wheels for bounded production dependencies without dev dependencies.
+  - Stage 2 (Runtime): Copies virtual environment to clean runtime image, creates unprivileged system user `campusfix` (UID `10001`, GID `10001`), configures predictable runtime env (`PYTHONDONTWRITEBYTECODE=1`, `PYTHONUNBUFFERED=1`, `PYTHONFAULTHANDLER=1`), exposes port `8000`.
+  - Server: Exec form `CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]` guaranteeing graceful shutdown and connection pool draining on `SIGTERM`.
+  - Native standard-library healthcheck against `/healthz`.
+  - Strictly prevents automatic database migrations on container startup.
+- **Frontend Production Container (`frontend/Dockerfile` & `frontend/nginx.conf`)**:
+  - Multi-stage build based on `node:20-alpine` (builder) and `nginx:1.27-alpine` (runtime).
+  - Stage 1: Deterministic dependency resolution via `npm ci` against `package-lock.json`, inlines configurable `ARG VITE_API_BASE_URL` (default `http://localhost:8000/api/v1`), builds production bundle via `tsc --noEmit && vite build`.
+  - Stage 2: Hardened Nginx configuration listening on unprivileged port `8080`, running as unprivileged user `nginx` (UID `101`), SPA fallback routing (`try_files $uri $uri/ /index.html;`), immutable 1-year caching on hashed `/assets/`, `no-cache` on `index.html`, security headers (`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`), and `/health` probe.
+- **Docker Ignore Policies**:
+  - `backend/.dockerignore`: Excludes `.env`, `.venv`, `__pycache__`, tests, caches, and git metadata.
+  - `frontend/.dockerignore`: Excludes `.env`, `node_modules`, `dist`, test files, coverage, and git metadata.
+  - Root `.dockerignore`: Global safeguard against secret and cache leakage during root-context builds.
+- **Local Orchestration (`docker-compose.yml` & `.env.docker.example`)**:
+  - Provisions 3 services: `postgres` (`postgres:15-alpine`), `backend`, `frontend`.
+  - PostgreSQL bound strictly to host loopback (`127.0.0.1:5432:5432`) and attached to `campusfix-internal` bridge network; zero public exposure.
+  - Health checks orchestrated (`pg_isready` -> `backend` -> `frontend`).
+  - Database migrations preserved strictly as an explicit manual command (`docker compose run --rm backend alembic upgrade head`).
+- **Host Docker Availability**:
+  - Docker CLI is not installed on the local Windows development host. Docker configuration, multi-stage syntax, file permissions, and scripts were validated against production specifications and tested tooling (Vite build, pytest, ruff). Standalone and compose runbooks documented in `docs/DEPLOYMENT.md`.
+
+---
+
+### Phase 5.1: Health Check Probes (`/healthz` & `/readyz`) *(Completed)*
+- **Liveness Probe (`GET /healthz`)**:
+  - Implemented in `backend/app/main.py`.
+  - Confirms application process responsiveness without depending on database state or external dependencies.
+  - Returns HTTP 200 `{ "status": "healthy" }`.
+  - Zero leakage of system, runtime, or infrastructure metadata.
+- **Readiness Probe (`GET /readyz`)**:
+  - Implemented in `backend/app/main.py`.
+  - Leverages existing `get_db` asynchronous SQLAlchemy session dependency without spawning redundant database engines.
+  - Executes a lightweight `SELECT 1` query via `db.execute(text("SELECT 1"))`.
+  - Returns HTTP 200 `{ "status": "ready", "database": "connected" }` when database connectivity succeeds.
+  - Returns HTTP 503 `{ "status": "unhealthy", "database": "unreachable" }` via `JSONResponse` when connectivity fails.
+  - Strictly prevents leakage of SQL tracebacks, connection strings, database credentials, or hostnames during failure scenarios.
+- **Unit & Regression Testing**:
+  - 5 dedicated unit tests created in `backend/tests/unit/test_health_probes.py`.
+  - Test cases cover:
+    1. Liveness returns HTTP 200 OK (`test_liveness_probe_returns_200_ok`).
+    2. Liveness remains healthy when database is unreachable (`test_liveness_probe_remains_healthy_when_database_is_unavailable`).
+    3. Readiness returns HTTP 200 OK when database is reachable (`test_readiness_probe_returns_200_when_database_is_reachable`).
+    4. Readiness returns HTTP 503 Service Unavailable when database connection fails (`test_readiness_probe_returns_503_when_database_is_unavailable`).
+    5. Zero sensitive tokens, passwords, or SQL strings exposed in health responses (`test_health_probes_do_not_expose_sensitive_details`).
+  - Total backend pytest suite: **282 / 282 passed in 9.34s** (100% passing, 0 failed, 0 skipped).
+  - Code hygiene: `ruff check backend` clean (0 errors), `ruff format --check backend` clean (52 files formatted).
+- **Strict Scope Boundaries Observed**:
+  - Zero database schema or migration changes.
+  - Zero new dependencies added.
+  - Zero credential or environment secret changes.
+  - Zero frontend code modified.
+  - Zero deployments or Docker container configurations initiated.
+
+---
+
+### Checkpoint 4.7 Audit Summary (Integration, Accessibility & Security)
+
+### 1.1 End-to-End Integration Verification Summary
+All 8 client workflows and backend API integrations were systematically audited and confirmed functional:
+1. **Authentication Portal (`SCR-01`)**:
+   - Registration (`POST /api/v1/auth/register`) enforces strong password complexity (>= 8 chars, uppercase, lowercase, number) and strictly assigns `STUDENT` role with immediate login.
+   - Login (`POST /api/v1/auth/login`) issues short-lived JWT stored in memory and sets `HttpOnly`, `SameSite=Lax` refresh cookie.
+   - Single-flight refresh mutex guarantees exactly one concurrent call to `/api/v1/auth/refresh` on 401s, preventing token family revocation.
+   - Logout (`POST /api/v1/auth/logout`) revokes active token family on server and clears browser cookie.
+2. **Student Portal & Ticket Dashboard (`SCR-02`)**:
+   - Queries `GET /api/v1/tickets` with server-side IDOR isolation (`WHERE creator_id = current_user.id`).
+   - Interactive status filter tabs (`ALL`, `SUBMITTED`, `ASSIGNED`, `IN_PROGRESS`, `RESOLVED`, `REJECTED`, `CANCELLED`) with live re-querying.
+   - Server-driven pagination with `PaginationBar`, layout-preserving skeleton loaders, and empty states.
+3. **Incident Reporting (`SCR-03`)**:
+   - Form loads facility categories dynamically via `GET /api/v1/categories`.
+   - Client and server validate Title (5–120 chars), Description (10–2000 chars with counter), Category, Location (3–100 chars), and Priority.
+   - Submits `POST /api/v1/tickets`, binds creator, mints sequential `CFX-YYYY-XXXXX` code in `SUBMITTED` status, and navigates to `/tickets/:id`.
+4. **Ticket Detail & Audit Timeline (`SCR-04`)**:
+   - Queries `GET /api/v1/tickets/{id}` and chronological history `GET /api/v1/tickets/{id}/history`.
+   - Renders incident summary, status badge, priority pill, location, and assigned technician.
+   - Renders chronological audit timeline of all state transitions, authors, and notes.
+   - High-visibility resolution callout box when ticket is `RESOLVED`.
+5. **Ticket Cancellation & State Transition Modals (`SCR-04 / SCR-06`)**:
+   - Role-governed action buttons strictly isolated by role and lifecycle state.
+   - Mandatory note validation (>= 10 chars) for `RESOLVE`, `REJECT`, and `REOPEN` dialogs.
+   - Optimistic concurrency control (`expected_version`): traps HTTP 409 `CONCURRENCY_CONFLICT`, displays high-visibility warning banner, and auto-refreshes ticket state.
+6. **Staff Workbench Queue (`SCR-05`)**:
+   - Dual-tab queue: "Assigned to Me" (`assigned_staff_id=me&status=ASSIGNED,IN_PROGRESS`) and "Unassigned Queue" (`status=SUBMITTED`).
+   - Quick Actions: "Claim Ticket" (self-assigns unassigned tickets) and "Start Work" (transitions `ASSIGNED` to `IN_PROGRESS`).
+   - Category and priority filters, client-side sorting (Newest, Oldest, Priority High-to-Low).
+7. **Staff Work Execution & Resolution (`SCR-05 / SCR-06`)**:
+   - Full progression verified: `SUBMITTED` $\to$ Claimed (`ASSIGNED`) $\to$ Started (`IN_PROGRESS`) $\to$ Resolved (`RESOLVED`).
+8. **Category Management Console (`SCR-08`)**:
+   - Administrator console (`/admin/categories`) lists all categories with active/inactive breakdown (`GET /categories?include_inactive=true`).
+   - Add category (`POST /categories`), Edit category (`PATCH /categories/{id}`), and HTTP 409 duplicate name handling.
+   - Deactivate / Activate confirmation dialogs with clear warning regarding student filing impact and historical ticket preservation.
+
+### 1.2 Accessibility & Responsive Design Audit
+- **WCAG 2.1 AA Compliance Verified**:
+  - Color contrast meets or exceeds 4.5:1 for normal text (e.g. `text-neutral-900` 16.1:1, `text-neutral-600` 5.7:1) and 3.0:1 for graphical/UI controls.
+  - Badges combine color and explicit text labels with high-contrast dots.
+  - Visible keyboard focus rings (`focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2`) across all interactive controls.
+  - Modal focus trapping: Tab and Shift+Tab cyclical navigation strictly contained; `Escape` key dismisses modals; focus is restored to the triggering element upon closure.
+  - Accessible form markup: Programmatic `<label htmlFor={id}>` bindings, `aria-describedby` error and helper text associations, `aria-invalid="true"` on validation errors, and `role="alert"` on error banners.
+  - Screen reader semantics: `role="dialog"`, `aria-modal="true"`, `role="tablist"`, `role="tab"`, `aria-selected`, `role="status"` for non-urgent feedback, and `aria-hidden="true"` on decorative SVG icons.
+- **Responsive Layout Verification**:
+  - Desktop (>= 1024px): 64px Topbar, 256px sticky Left Sidebar, and semantic multi-column `<table>` layouts.
+  - Tablet (768px - 1023px): Collapsible navigation, fluid layout reflow.
+  - Mobile (< 768px): Sticky Mobile Bottom Navigation with >= 48x48px touch targets, stacked card transformation in `DataTable`.
+- **Manual Accessibility Items Not Tested in Headless Environment**:
+  - Screen reader pronunciation across varying proprietary synthesizers (JAWS, NVDA, VoiceOver).
+  - Physical multi-touch device responsiveness and pinch-to-zoom gestures.
+  - Reflow and layout behavior at 400% browser zoom level.
+  - Operating system forced high-contrast mode (Windows Contrast Themes).
+
+### 1.3 Security Review & Discrepancy Findings
+- **Storage Sanitization**: Confirmed zero usage of `localStorage` or `sessionStorage` for authentication tokens. JWT access tokens reside strictly in JavaScript memory state.
+- **Cookie Security**: Refresh tokens stored in `HttpOnly`, `SameSite=Lax` cookies; inaccessible to client-side scripts.
+- **Server-Authoritative RBAC**: Presentation-layer guards (`ProtectedRoute`, `RoleRoute`) backed by strict FastAPI dependency injection (`get_current_active_user`, `require_admin`, `require_staff`).
+- **IDOR Protection**: Verified at both service and API levels; students cannot retrieve or filter tickets belonging to other students (returns HTTP 404 with zero information leakage).
+- **Ticket Cancellation Discrepancy Analysis**:
+  - **Requirement (`FR-016`)**: "Students may cancel tickets filed by themselves while in SUBMITTED or ASSIGNED status. Staff and Administrator roles reject or reassign work orders."
+  - **Backend State Machine (`ticket_fsm.py` line 275)**: Code specifies `if role != UserRole.STUDENT and role != UserRole.ADMINISTRATOR: raise UnauthorizedTransitionError(...)`, allowing an administrator to cancel *only if* `is_creator == True` (i.e. if the admin personally authored the incident).
+  - **Frontend Behavior (`TicketDetailPage.tsx`)**: Strictly limits `canCancel` to `role === 'STUDENT' && isCreator`. Administrators see "Reject Ticket" (`REJECTED`) and "Assign Technician", adhering to institutional facility workflows.
+  - **Audit Verdict**: Discrepancy noted and documented. Zero backend modifications were made per strict boundaries.
+
+### 1.4 Comprehensive Regression Test Metrics
+- **Frontend Test Suite (Vitest)**:
+  - **139 / 139 passed across 21 test files** (100% passing in 11.73s).
+  - **0 failed, 0 skipped**.
+- **TypeScript Strict Compilation**:
+  - `tsc --noEmit` clean: **0 errors**.
+- **ESLint Code Quality**:
+  - `npm run lint` clean: **0 errors, 0 warnings**.
+- **Production Bundle Compilation**:
+  - `vite build` succeeded in 1.71s (`dist/` generated: JS 266.58 kB, CSS 35.09 kB).
+- **Backend Regression Suite (pytest)**:
+  - **277 / 277 passed in 4.54s** (100% passing, 0 failed, 0 skipped).
+  - Live PostgreSQL integration test suites:
+    1. `test_live_postgresql_user_email_unique_constraint` (`PASSED`)
+    2. `test_live_postgresql_refresh_token_concurrency` (`PASSED`)
+    3. `test_live_postgresql_ticket_concurrency_and_row_locking` (`PASSED`)
+    4. `test_live_postgresql_migration` (`PASSED`)
+- **Backend Code Format & Linters**:
+  - `ruff check backend`: Clean (0 errors).
+  - `ruff format --check backend`: 51 files already formatted cleanly.
+
+---
+
+### Prior Checkpoint 4.6: Category Management Console (SCR-08)
+- **Screen SCR-08: Category Management Console (`frontend/src/pages/admin/CategoryManagementPage.tsx`)**:
+  - Administrator-only protected route `/admin/categories` enforced with `RoleRoute allowedRoles={['ADMINISTRATOR']}` within the authenticated `AppShell`.
+  - Accessible tab switcher with live status counts:
+    - **"All Categories"**: Displays complete operational taxonomy.
+    - **"Active Only"**: Filters categories currently available for student ticket submission.
+    - **"Inactive"**: Filters deactivated categories hidden from students.
+  - Real-time client-side search filtering by category name or description.
+  - Operational columns and layout:
+    - Category Title (`name`) in high-contrast bold typography.
+    - Scope and example description (`description`) with line-clamp truncation.
+    - Status pill badge with semantic color dot (`ActiveStatusBadge` — `ACTIVE` in emerald, `INACTIVE` in neutral).
+    - Creation timestamp formatted with localized short date.
+    - Quick Actions column:
+      - **"Edit"**: Opens prefilled `CategoryFormModal` allowing modification of category title, description, or active status.
+      - **"Deactivate"** (for active categories): Opens `CategoryStatusModal` warning modal explaining student filing impact and historical ticket preservation.
+      - **"Activate"** (for inactive categories): Opens `CategoryStatusModal` to restore category to student filing choices.
+  - **Category Creation Workflow (`frontend/src/pages/admin/components/CategoryFormModal.tsx`)**:
+    - Triggered by "+ Add New Category" header button.
+    - Validates mandatory fields: Name (2–100 chars), Description (5–500 chars with character counter).
+    - Checkbox toggle for initial active status (default `true`).
+    - Dispatches `POST /api/v1/categories`.
+    - Handles HTTP 409 conflict (`CATEGORY_ALREADY_EXISTS`) cleanly within the modal without dismissing form input.
+    - Prevents duplicate clicks by disabling inputs and showing spinner during in-flight submission.
+    - Presents high-visibility success `AlertBanner` and refreshes table upon successful creation.
+  - **Category Modification & Status Toggle Workflows (`CategoryFormModal.tsx` & `CategoryStatusModal.tsx`)**:
+    - Dispatches `PATCH /api/v1/categories/{id}` with updated fields or `{ is_active: boolean }`.
+    - Deactivation modal provides clear institutional reassurance that historical tickets are preserved.
+  - **Client API Integration (`frontend/src/api/categories.ts`)**:
+    - Implemented full endpoint coverage: `listCategories(includeInactive = false)`, `getCategory(id)`, `createCategory(payload)`, `updateCategory(id, payload)`.
+  - **Design System Component Extensions (`frontend/src/components/ui/Badge.tsx`)**:
+    - Authored and exported `ActiveStatusBadge` supporting WCAG 2.1 AA contrast standards.
+- **Route & Navigation Shell Integration (`frontend/src/App.tsx`)**:
+  - Wired `/admin/categories` inside `<RoleRoute allowedRoles={['ADMINISTRATOR']}>`.
+  - Root redirect for authenticated administrators lands on `/admin/categories`.
+  - Legacy `/admin/dashboard` route safely redirects to `/admin/categories` pending dashboard creation.
+- **Quality Gates & Automated Verification**:
+  - 14 new Vitest unit and integration tests added in `frontend/tests/pages/CategoryManagementPage.test.tsx` covering administrator access, student/staff 403 access denial, category listing, tab filtering, real-time search, category addition, field validation, duplicate name conflict handling (HTTP 409), category editing, deactivation confirmation, activation confirmation, loading skeleton states, and retry CTAs on network errors.
+  - 5 new Vitest API client tests added in `frontend/tests/api/categories.test.ts`.
+  - 1 new badge unit test in `frontend/tests/components/Badge.test.tsx`.
+  - Total frontend test suite: **139/139 tests passing across 21 test files** (100% passing in 11.88s).
+  - TypeScript strict typecheck (`tsc --noEmit` via `npm run build`): **0 errors**.
+  - ESLint check (`npm run lint`): **0 errors, 0 warnings**.
+  - Production bundle build (`vite build`): **Clean compilation** (`dist/` assets generated in 1.71s).
+  - Backend regression test suite (`backend/.venv/Scripts/pytest.exe`): **277/277 passed in 5.80s**.
+- **Strict Scope Boundaries Maintained**:
+  - Zero backend code, database models, schemas, or migrations touched.
+  - Zero new runtime or dev dependencies added.
+  - In-memory access token storage and HttpOnly refresh cookies strictly preserved.
+  - Known limitation: Backend `CategoryResponse` schema does not calculate live ticket counts per category; console renders Title, Scope Description, Status, Created Date, and Actions in strict compliance with the frozen backend API contract.
+
+---
+
+### Prior Checkpoint 4.5: Staff Workbench Queue and Work Execution
 - **Screen SCR-05: Staff Workbench Queue (`frontend/src/pages/staff/StaffQueuePage.tsx`)**:
   - Staff-only protected route `/staff/queue` enforced with `RoleRoute allowedRoles={['STAFF']}` inside the authenticated `AppShell`.
   - Accessible tab switcher with live badge counts:
@@ -219,7 +501,20 @@ The Project Owner formally authorized execution of **Phase 4, Checkpoint 4.5: St
 | [**`backend/app/api/deps.py`**](file:///c:/Sagar%20Project/CampusFix/backend/app/api/deps.py) | Dependency injection providers: database session generator, get_current_user (JWT claim and DB check), and get_current_active_user. | **Completed (Checkpoint 3.4)** |
 | [**`backend/app/api/v1/auth.py`**](file:///c:/Sagar%20Project/CampusFix/backend/app/api/v1/auth.py) | REST API endpoints: POST /register, POST /login, POST /refresh, POST /logout, GET /me with HttpOnly cookies. | **Completed (Checkpoint 3.4)** |
 | [**`backend/app/api/v1/__init__.py`**](file:///c:/Sagar%20Project/CampusFix/backend/app/api/v1/__init__.py) | API v1 router package aggregating versioned endpoints. | **Completed (Checkpoint 3.4)** |
-| [**`backend/app/main.py`**](file:///c:/Sagar%20Project/CampusFix/backend/app/main.py) | FastAPI application factory, CORS middleware, standardized error envelope exception handlers, and lifespan lifecycle. | **Completed (Checkpoint 3.4)** |
+| [**`backend/app/main.py`**](file:///c:/Sagar%20Project/CampusFix/backend/app/main.py) | FastAPI application factory, CORS middleware, standardized error envelope exception handlers, lifespan lifecycle, and operational health probes (`GET /healthz`, `GET /readyz`). | **Completed (Checkpoint 3.4 / 5.1)** |
+| [**`backend/app/scripts/bootstrap_admin.py`**](file:///c:/Sagar%20Project/CampusFix/backend/app/scripts/bootstrap_admin.py) | Remediated secure operational CLI for initial Administrator bootstrapping (`python -m app.scripts.bootstrap_admin`) with password complexity, Argon2id hashing, promotion safety, and target DB guards. | **Remediation Completed (Checkpoint 5.5)** |
+| [**`backend/app/scripts/__init__.py`**](file:///c:/Sagar%20Project/CampusFix/backend/app/scripts/__init__.py) | Package initialization manifest for backend operational scripts. | **Completed (Checkpoint 5.5)** |
+| [**`backend/tests/unit/test_health_probes.py`**](file:///c:/Sagar%20Project/CampusFix/backend/tests/unit/test_health_probes.py) | Unit test suite asserting liveness probe 200 OK, database independence, readiness probe 200/503 states, and zero credential leakage (5 tests). | **Completed (Checkpoint 5.1)** |
+| [**`backend/tests/unit/test_bootstrap_admin.py`**](file:///c:/Sagar%20Project/CampusFix/backend/tests/unit/test_bootstrap_admin.py) | Comprehensive test suite for admin provisioning CLI: password validation, Argon2id hashing, existing admin immutability, interactive confirmation, profile preservation, target DB safety, and engine disposal (37 tests). | **Completed & Verified (Checkpoint 5.5)** |
+| [**`backend/Dockerfile`**](file:///c:/Sagar%20Project/CampusFix/backend/Dockerfile) | Production multi-stage Dockerfile (python:3.11-slim builder & runtime, unprivileged UID 10001, uvicorn ASGI, healthcheck). | **Completed (Checkpoint 5.2)** |
+| [**`backend/.dockerignore`**](file:///c:/Sagar%20Project/CampusFix/backend/.dockerignore) | Backend Docker ignore rules excluding secrets, virtualenvs, caches, and test artifacts. | **Completed (Checkpoint 5.2)** |
+| [**`frontend/Dockerfile`**](file:///c:/Sagar%20Project/CampusFix/frontend/Dockerfile) | Production multi-stage Dockerfile (node:20-alpine builder, nginx:1.27-alpine runtime, non-root UID 101, unprivileged port 8080). | **Completed (Checkpoint 5.2)** |
+| [**`frontend/nginx.conf`**](file:///c:/Sagar%20Project/CampusFix/frontend/nginx.conf) | Hardened unprivileged Nginx configuration with SPA fallback, immutable asset caching, security headers, /health probe, and same-origin /api/ reverse proxy. | **Completed (Checkpoint 5.2 / 5.3)** |
+| [**`frontend/vercel.json`**](file:///c:/Sagar%20Project/CampusFix/frontend/vercel.json) | Vercel Edge CDN configuration with /api/* path rewrites, probe proxying, SPA fallback, and security headers. | **Completed (Checkpoint 5.3)** |
+| [**`frontend/.dockerignore`**](file:///c:/Sagar%20Project/CampusFix/frontend/.dockerignore) | Frontend Docker ignore rules excluding node_modules, build outputs, tests, and secrets. | **Completed (Checkpoint 5.2)** |
+| [**`.dockerignore`**](file:///c:/Sagar%20Project/CampusFix/.dockerignore) | Root Docker ignore rules guarding global build contexts. | **Completed (Checkpoint 5.2)** |
+| [**`docker-compose.yml`**](file:///c:/Sagar%20Project/CampusFix/docker-compose.yml) | Local multi-container integration stack for PostgreSQL, backend, and frontend with healthchecks and loopback isolation. | **Completed (Checkpoint 5.2)** |
+| [**`.env.docker.example`**](file:///c:/Sagar%20Project/CampusFix/.env.docker.example) | Environment variable template for local Docker Compose orchestration. | **Completed (Checkpoint 5.2)** |
 | [**`backend/tests/unit/test_auth_service.py`**](file:///c:/Sagar%20Project/CampusFix/backend/tests/unit/test_auth_service.py) | Unit test suite for AuthService registration, authentication, login, token rotation, and logout (9 tests). | **Completed (Checkpoint 3.4)** |
 | [**`backend/tests/unit/test_auth_api.py`**](file:///c:/Sagar%20Project/CampusFix/backend/tests/unit/test_auth_api.py) | Unit test suite for /auth REST endpoints covering HTTP status codes, envelopes, cookie attributes, and security boundaries (18 tests). | **Completed (Checkpoint 3.4)** |
 | [**`backend/tests/integration/test_auth_endpoints_pg.py`**](file:///c:/Sagar%20Project/CampusFix/backend/tests/integration/test_auth_endpoints_pg.py) | PostgreSQL integration test verifying database uniqueness constraint on email (verified passing against campusfix_test). | **Completed & Verified (Checkpoint 3.7)** |
@@ -584,16 +879,558 @@ graph TD
 
 ---
 
-## 8. Next Action & Entry Conditions for Checkpoint 4.6
+## 8. Phase 4 Formal Gate Sign-off
 
-With **Checkpoint 4.5: Staff Workbench Queue and Work Execution** successfully completed:
-1. **Checkpoint 4.5 Work Complete**:
-   - `frontend/src/pages/staff/StaffQueuePage.tsx`: SCR-05 Staff Workbench Queue with tab switcher ("Assigned to Me" and "Unassigned Queue"), badge counts, category and priority filters, client-side sorting (Newest, Oldest, Priority), quick-actions ("Claim Ticket", "Start Work", "Resolve Work >", "Open Work >"), HTTP 409 concurrency conflict detection and automatic queue reload, duplicate-click prevention, contextual empty states, and pagination.
-   - `frontend/src/App.tsx`: Wired staff route `/staff/queue` protected by `<RoleRoute allowedRoles={['STAFF']}>`.
-   - `frontend/tests/pages/StaffQueuePage.test.tsx`: 11 unit and integration tests covering all operational workbench flows, quick-actions, HTTP 409 conflict recovery, empty states, client sorting, and error retries.
-   - Vitest test suite: **119/119 tests passing across 19 test files** (100% passing).
-   - Strict TypeScript compiler (`tsc --noEmit`), ESLint, and Vite production build verified clean.
-   - Pytest backend test suite verified clean (**277/277 passed in 11.17s**).
-2. **Next Milestone**: **Checkpoint 4.6: Category Management Console (SCR-08: Facility Categories)**.
-3. **Execution Status**: In accordance with the sequential checkpoint execution rules, work is currently **STOPPED** awaiting the Project Owner's explicit authorization to proceed with Checkpoint 4.6.
+Phase 4 (Client Interfaces & API Integration) has successfully completed all development and audit gates:
+- **Checkpoints Completed**:
+  - Checkpoint 4.1: Frontend API Client Layer, Auth Context & Security Foundations (`APPROVED`)
+  - Checkpoint 4.2: Design System Component Suite (`APPROVED`)
+  - Checkpoint 4.3: Authentication Portal, Student Dashboard & Ticket Filing (`APPROVED`)
+  - Checkpoint 4.4: Ticket Details, Audit Timeline & State Transition Modals (`APPROVED`)
+  - Checkpoint 4.5: Staff Workbench Queue & Work Execution (`APPROVED`)
+  - Checkpoint 4.6: Category Management Console (`APPROVED`)
+  - Checkpoint 4.7: Full Integration, Accessibility & Regression Testing (`APPROVED`)
+- **Reported Quality Gate Metrics**:
+  - Frontend Vitest Test Suite: **139 / 139 passed across 21 test files** (100% passing, 0 failed, 0 skipped).
+  - TypeScript Strict Compilation: `tsc --noEmit` reports **0 errors**.
+  - ESLint Code Quality: `eslint .` reports **0 errors, 0 warnings**.
+  - Production Bundle: `vite build` clean compilation (JS: 266.58 kB, CSS: 35.09 kB).
+  - Backend pytest Test Suite: **277 / 277 passed** (including live PostgreSQL concurrency and migration tests).
+  - Backend Ruff Linter & Formatter: **100% clean across all 51 Python files**.
+- **Phase Gate Decision**: **Phase 4 is formally signed off and closed**. No further client-tier feature code may be introduced without a change request.
+
+---
+
+## 9. Phase 5 Deployment Readiness Audit & Operational Analysis
+
+A comprehensive pre-flight technical audit was executed across project documentation, configuration manifests, and engine lifecycles to prepare CampusFix for production deployment without altering application code or provisioning infrastructure.
+
+### 9.1 Required Environment Variables & Configuration Matrix
+
+#### Backend Runtime Configuration (`backend/.env` / PaaS Environment Secrets)
+| Variable | Type | Production Rule / Value | Operational Description |
+| :--- | :--- | :--- | :--- |
+| `ENVIRONMENT` | String | `production` | Enables strict validation guards: blocks weak secrets and sets `secure=True` cookie flags. |
+| `DATABASE_URL` | String | `postgresql+asyncpg://<user>:<pass>@<host>:<port>/<db>` | Connection string for primary managed PostgreSQL with SSL enforced. |
+| `SECRET_KEY` | String | Cryptographic 64+ hex string (256-bit entropy) | `Settings.validate_production_security` explicitly aborts startup if key < 64 chars or contains placeholder tokens. |
+| `ALGORITHM` | String | `HS256` | Cryptographic JWT signing algorithm. |
+| `ACCESS_TOKEN_EXPIRE_MINUTES`| Integer | `15` | Expiry duration for stateless memory-resident access tokens. |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | Integer | `7` | Maximum lifetime for refresh token families. |
+| `ALLOWED_ORIGINS` | String | `https://campusfix.<domain>,https://app.campusfix.<domain>` | Strictly enumerated production origins; wildcards (`*`) strictly disallowed when credentials are included. |
+| `LOG_LEVEL` | String | `INFO` or `WARNING` | Application logging verbosity. |
+| `DB_POOL_SIZE` | Integer | `10` (default, tune per instance) | Permanent connections held in connection pool. |
+| `DB_MAX_OVERFLOW` | Integer | `20` (default, tune per instance) | Spike overflow connections permitted during peak load. |
+| `DB_POOL_TIMEOUT` | Float | `30.0` | Seconds to await available pool connection before timeout. |
+| `DB_POOL_RECYCLE` | Integer | `1800` (30 minutes) | Socket recycle threshold defending against stale cloud connections. |
+| `DB_POOL_PRE_PING` | Boolean | `true` | Pessimistic checkout liveness probe avoiding broken connection errors. |
+
+#### Frontend Client Configuration (`frontend/.env` / CDN Build Environment)
+| Variable | Type | Production Rule / Value | Operational Description |
+| :--- | :--- | :--- | :--- |
+| `VITE_API_BASE_URL` | String | `https://api.campusfix.<domain>/api/v1` or `/api/v1` | Public endpoint for backend REST API; relative `/api/v1` recommended if edge reverse proxy is used. |
+
+### 9.2 Secret-Generation & Secure Storage Requirements
+- Production `SECRET_KEY` must be generated using an operating-system cryptographically secure pseudo-random number generator (CSPRNG):
+  ```bash
+  openssl rand -hex 32
+  # or
+  python -c "import secrets; print(secrets.token_hex(32))"
+  ```
+- Secrets must never be committed to source control or baked into Docker container images. Injection must occur via host PaaS secret managers (e.g., Render/Railway Secrets, AWS SSM Parameter Store, or Vault).
+- Database credentials in `DATABASE_URL` must be masked during startup logging (guaranteed by `Settings.masked_database_url`).
+
+### 9.3 Production CORS, SameSite Cookies & Cross-Site Routing Constraints
+- **Cookie Security Flags**:
+  - `httponly=True`: Protects refresh tokens from malicious JavaScript and XSS extraction.
+  - `secure=settings.is_production`: Guarantees refresh cookies are transmitted solely over HTTPS in production.
+  - `path="/api/v1/auth"`: Restricts cookie transmission strictly to authentication handshake endpoints.
+- **Cross-Site Deployment Constraint**:
+  - `backend/app/api/v1/auth.py` sets `samesite="lax"`.
+  - If frontend and backend are hosted on separate top-level domains (e.g. `frontend.vercel.app` and `api.onrender.com`), browsers treat API calls as cross-site third-party requests. Browsers will **not** attach `SameSite=Lax` cookies to cross-site `fetch(..., { credentials: 'include' })` calls!
+  - **Required Architecture for Phase 5**:
+    1. **Option A (Recommended)**: Edge Reverse Proxy — Configure edge CDN (e.g., Vercel rewrites or Cloudflare proxy) to route `/api/*` requests directly to backend compute, keeping frontend and API strictly same-origin.
+    2. **Option B**: Custom Shared Apex Domain — Host both services under subdomains of a shared organizational domain (e.g. `app.campusfix.university.edu` and `api.campusfix.university.edu`), allowing `SameSite=Lax` cookies to flow normally.
+
+### 9.4 Database Migration & Pre-Deployment Execution Protocol
+- **No Startup Migrations**: Application startup does not auto-migrate; doing so in multi-worker or horizontal environments causes table locking deadlocks and race conditions.
+- **Alembic Release Phase**: In container and PaaS environments, migrations must run as an isolated release phase step prior to routing traffic to new web instances:
+  ```bash
+  alembic upgrade head
+  ```
+- **Target URL Injection**: `backend/alembic/env.py` supports programmatic target overrides via `ALEMBIC_DATABASE_URL` or `DATABASE_URL` with percent-escaped passwords (`%%`).
+- **Pre-Migration Rollback Check**: Future migrations must have tested offline and live downgrade scripts before production deployment.
+
+### 9.5 Lifecycle Management: Startup, Shutdown & Connection Pooling
+- Application lifespan (`backend/app/main.py`):
+  - Startup: Connection pool initializes lazily upon first query.
+  - Shutdown: The async lifespan cleanly calls `await close_db_engine()` to drain and dispose of active database connections upon receiving `SIGTERM` or `SIGINT`.
+- Recommended production server: Uvicorn workers managed by Gunicorn (`gunicorn -w 4 -k uvicorn.workers.UvicornWorker app.main:app`).
+
+### 9.6 Observability, Logging & Health Probes
+- **Health Probes Operational (`Checkpoint 5.1`)**: Operational probes specified in `docs/DEPLOYMENT.md` (`GET /healthz` and `GET /readyz`) are fully implemented in `backend/app/main.py` and covered by unit tests in `backend/tests/unit/test_health_probes.py`. External container healthchecks, load balancers, and uptime monitors can target `/healthz` for process liveness and `/readyz` for database connectivity.
+
+### 9.7 Backup, Point-In-Time Recovery & Disaster Recovery
+- Managed PostgreSQL instance must enforce automated continuous WAL archiving with minimum 7-day Point-In-Time Recovery (PITR).
+- Pre-release on-demand snapshots must be triggered before applying schema migrations in production.
+
+---
+
+## 10. Record of Unresolved Issues & Operational Risk Register
+
+The risk register explicitly distinguishes between **Configured / Syntactically Audited Architecture** (statically verified in unit/integration suites and configuration manifests) and **Runtime-Verified Behavior** (requiring live execution in the Phase 5.6 staging environment).
+
+### 10.1 Runtime-Verification Gaps (Pending Live Staging Verification in Phase 5.6)
+
+| Risk / Gap | Nature | Severity | Verification Scope in Phase 5.6 |
+| :--- | :--- | :--- | :--- |
+| **Unverified Docker Container Runtime** | Runtime Environment | High | Docker daemon is not installed on the local Windows development host. Container startup, process signal propagation (`SIGTERM` graceful drain within 10s), memory limits, and non-root execution (`campusfix` UID 10001, `nginx` UID 101) require live validation on staging compute. |
+| **Unverified Nginx / Backend Container Networking** | Network Topology | High | Inter-container DNS resolution (`backend_api` -> `backend:8000`), persistent connection keepalive (`keepalive 32`), client IP and proxy header pass-through, and `Set-Cookie` header preservation must be proven functional during live orchestration. |
+| **Unprovisioned DNS & TLS Certificates** | Ingress & Transport | High | Public staging apex/subdomain and automated ACME/Let's Encrypt TLS termination have not yet been provisioned. Valid HTTPS termination is mandatory for the browser to accept `Secure=True` cookies and prevent transport interception. |
+| **Unverified Browser Cookie Flow via Gateway** | Authentication Flow | High | End-to-end browser verification of `HttpOnly`, `SameSite=Lax`, `Secure=True` refresh cookie storage across actual browser sessions, single-flight refresh mutex on 401s, path scoping (`/api/v1/auth`), and logout revocation must be validated in desktop and mobile browsers. |
+| **Manual Accessibility Testing Gap** | QA Constraint | Low | Automated axe/WCAG linting is complete, but physical assistive hardware validation (screen-reader pronunciation on NVDA/VoiceOver, 400% zoom responsive reflow, and touch-target clearance on physical devices) must be executed during the pilot evaluation. |
+
+### 10.2 Architectural & Specification Constraints (Configured / Audited Baseline)
+
+| Issue / Discrepancy | Nature | Severity | Operational Status & Mitigation |
+| :--- | :--- | :--- | :--- |
+| **Ticket Cancellation Discrepancy** | Spec vs FSM Logic | Low | **DOCUMENTED**: `ticket_fsm.py` line 275 permits admin cancellation if `is_creator == True`, while `FR-016` and frontend `TicketDetailPage.tsx` restrict cancellation strictly to student ticket creators. Operationally, administrators resolve issues via `REJECTED` or assignment reassignment. Preserved as documented. |
+| **Missing Admin Endpoints** | Frozen Scope | Medium | **DOCUMENTED**: `/api/v1/admin/dashboard/metrics` and `/api/v1/admin/users` remain unimplemented per backend freeze. The frontend application shell safely handles this by routing `/admin/dashboard` to the fully functional `/admin/categories` console. |
+
+### 10.3 Resolved Infrastructure & Security Milestones (Signed Off)
+
+| Capability | Milestone | Resolution Details |
+| :--- | :--- | :--- |
+| **Missing Health Probes** | Checkpoint 5.1 | Lightweight `/healthz` (liveness) and `/readyz` (PostgreSQL `SELECT 1` readiness) implemented in `backend/app/main.py` with 5 dedicated unit tests (HTTP 200/503, credential redaction). |
+| **Cross-Site Cookie Attenuation** | Checkpoint 5.3 | Same-Origin reverse proxy architecture established via containerized Nginx gateway (`frontend/nginx.conf`) and Vercel edge rewrites (`frontend/vercel.json`), preserving `SameSite=Lax` cookies natively without third-party cookie permissions. |
+| **Initial Admin User Bootstrapping** | Checkpoint 5.5 | Secure CLI tool (`backend/app/scripts/bootstrap_admin.py`) remediated with Argon2id hashing, RFC 5322 normalization, masked interactive double-entry prompt, exact `'yes'` promotion confirmation, database host safety guards, and guaranteed engine disposal. Verified with 37 unit tests and formally signed off. |
+
+---
+
+## 11. Recommended Phase 5 Sequential Execution Plan
+
+1. **Phase 5.1: Health Check & Operational Endpoint Implementation** *(COMPLETE)*: Implemented lightweight `/healthz` (liveness) and `/readyz` (PostgreSQL `SELECT 1` readiness) probes in `backend/app/main.py` with full test coverage (5 unit tests, 282 total passed).
+2. **Phase 5.2: Production Docker & Container Configuration** *(COMPLETE)*: Authored multi-stage, rootless Dockerfiles for backend (`python:3.11-slim`, UID 10001, port 8000) and frontend (`node:20-alpine` builder, `nginx:1.27-alpine` runtime, UID 101, port 8080), `.dockerignore` files, and `docker-compose.yml` for local orchestration.
+3. **Phase 5.3: Reverse Proxy & Edge CDN Configuration** *(COMPLETE)*: Implemented same-origin Nginx reverse proxy gateway (`frontend/nginx.conf`) and Vercel edge rewrites (`frontend/vercel.json`), preserving `HttpOnly`, `SameSite=Lax` refresh cookies across all workflows.
+4. **Phase 5.4: Production Database Provisioning & Baseline Migration** *(COMPLETE)*: Evaluated managed PostgreSQL options (Neon vs Render vs RDS), audited asyncpg SSL connection requirements and pooling, documented release-phase migration runbook and disaster recovery protocols, and designed administrator bootstrapping architecture.
+5. **Phase 5.5: Secure Initial Admin Provisioning CLI** *(FORMALLY SIGNED OFF)*: Remediated CLI tool (`app.scripts.bootstrap_admin`) with Argon2id hashing, RFC 5322 validation, interactive masked prompting, role escalation guards with exact 'yes' confirmation, target database safety checks, and guaranteed engine disposal. 37 dedicated unit tests passing. Formally approved and signed off by the Project Owner.
+6. **Phase 5.6: Pilot Staging Deployment & Live End-to-End Smoke Test** *(PLANNING COMPLETE — AWAITING AUTHORIZATION TO EXECUTE)*: Detailed staging deployment architecture, migration sequence, test matrix, and release gates prepared. Ready for execution upon explicit Project Owner authorization.
+
+---
+
+## 12. Governance Stoppage & Authorization Gate
+
+In strict accordance with project governance and phase-gate instructions:
+- **Phase 5.5 Signed Off**: Phase 5.5 implementation, security remediation, 37 unit tests, and documentation are formally approved by the Project Owner.
+- **Phase 5.6 Planning Complete**: Architectural plan, environment selection, security controls, risk mitigations, acceptance criteria, and operational runbooks are fully prepared.
+- **Strict Scope Boundaries Maintained**:
+  - Zero cloud resources or accounts provisioned.
+  - Zero remote or staging databases created.
+  - Zero staging or production migrations executed.
+  - Zero containers built or deployed.
+  - Zero application code, dependencies, or infrastructure configurations modified.
+  - Zero Git commits or pushes made.
+- **Phase 5.6 Deferred**: Pilot staging deployment execution remains **STOPPED**.
+- **Awaiting Project Owner Authorization**: Execution of Phase 5.6 will begin only upon explicit approval from the Project Owner.
+
+---
+
+## 13. Phase 5.6 Staging Deployment & Release Verification Plan
+
+This specification establishes the complete, production-grade staging deployment architecture, operational runbooks, and smoke-testing protocols for validating CampusFix in an isolated staging environment prior to production release.
+
+```mermaid
+flowchart TD
+    subgraph ClientTier ["1. Client Access Tier"]
+        Browser["Desktop & Mobile Web Browsers"]
+        DNS["Staging DNS (CNAME: staging.campusfix.university.edu)"]
+    end
+
+    subgraph GatewayTier ["2. Ingress & Edge Proxy Tier"]
+        TLS["PaaS Edge TLS Termination (Let's Encrypt / ACME)"]
+        NginxGateway["Nginx Gateway Container (Port 8080, UID 101)"]
+    end
+
+    subgraph ComputeTier ["3. Application Compute Tier"]
+        StaticAssets["Static React SPA Files (/usr/share/nginx/html)"]
+        FastAPIApp["FastAPI REST API Service (Uvicorn, Port 8000, UID 10001)"]
+    end
+
+    subgraph DatabaseTier ["4. Staging Persistence Tier"]
+        NeonDB[("Neon Managed PostgreSQL 15/16 (campusfix_staging)\nSSL Enforced (?ssl=require)\nContinuous WAL Archiving & 7-Day PITR")]
+    end
+
+    Browser -->|HTTPS :443| TLS
+    TLS --> NginxGateway
+    NginxGateway -->|GET /assets/*, index.html| StaticAssets
+    NginxGateway -->|Proxy /api/*, /healthz, /readyz| FastAPIApp
+    FastAPIApp -->|Async SQLAlchemy (asyncpg + SSL)| NeonDB
+```
+
+---
+
+### 13.1 Hosting Platform Options & Recommended Staging Architecture
+
+#### Hosting Platform Evaluation Matrix
+
+| Option | Architecture | Operational Trade-offs | Estimated Monthly Cost *(Planning Estimate)* | Recommendation Verdict |
+| :--- | :--- | :--- | :--- | :--- |
+| **Option A: PaaS Container Services (Render / Railway)** | Containerized Nginx gateway & FastAPI backend running as coordinated web services; external serverless PostgreSQL. | Zero server administration; automated TLS certificates; built-in health probe restarts; native secret injection; isolated Release Command support. | **$0.00 – $7.00 / month**<br>*(Neon Free Tier $0 + Render Starter $7/mo or Railway Hobby ~$5/mo)* | **RECOMMENDED FOR STAGING PILOT**: Fastest time-to-staging, lowest operational burden, native same-origin routing, automated Let's Encrypt SSL. |
+| **Option B: Cloud Container VM (AWS EC2 / DigitalOcean Droplet)** | Docker Compose stack (`nginx`, `backend`, `postgres`) running on a dedicated Linux virtual machine with Certbot. | Requires manual OS patching, firewall maintenance, Docker host security, and Certbot ACME renewal configuration. | **$6.00 – $15.00 / month**<br>*(e.g., DigitalOcean 1GB Droplet $6/mo or AWS t4g.small ~$12/mo)* | Viable fallback if institution requires hosting within an existing private AWS VPC. |
+| **Option C: Hybrid Serverless Edge + Container API (Vercel + Render)** | Static frontend deployed to Vercel Edge; backend deployed to Render; edge rewrites map `/api/*` to Render. | Requires coordinating two independent PaaS dashboards and synchronized DNS records. Relies on CDN edge rewrites for cookie forwarding. | **$0.00 – $7.00 / month**<br>*(Vercel Hobby $0 + Render Starter $7/mo)* | Acceptable, but adds multi-vendor operational complexity compared to Option A. |
+
+> [!NOTE]
+> **Operational Cost Estimates**: All costs listed above are rough estimates for budgeting and planning only. Actual costs depend on cloud provider billing cycles, data transfer volume, and resource utilization.
+
+#### Recommended Staging Architecture: Option A (Render / Railway + Neon PostgreSQL)
+1. **Frontend / Gateway**: Nginx container (`frontend/Dockerfile`) deployed to unprivileged port 8080. Serves compiled React assets with immutable 1-year caching for `/assets/` and `no-cache` for `index.html`. Proxies `/api/` directly to backend compute.
+2. **Backend API**: Python 3.11 container (`backend/Dockerfile`) running as unprivileged user `campusfix` (UID 10001). Exposes port 8000 internally.
+3. **Database**: Dedicated Neon Serverless PostgreSQL database instance (`campusfix_staging`) with SSL enforced (`?ssl=require`), connection pooling, and continuous WAL archiving.
+
+---
+
+### 13.2 Staging PostgreSQL Requirements & Isolated Credentials
+
+1. **Database Isolation**:
+   - Database name: `campusfix_staging` (strictly separated from development and future production databases).
+   - Dedicated application database user: `campusfix_staging_app`.
+   - Dedicated password generated via CSPRNG (minimum 32 characters).
+   - No shared administrative privileges (`SUPERUSER` permissions withheld from application user).
+2. **Network & SSL Security**:
+   - Connection string must enforce TLS: `postgresql+asyncpg://campusfix_staging_app:<password>@<neon-host>:5432/campusfix_staging?ssl=require`.
+   - Plaintext / unencrypted PostgreSQL connections strictly prohibited.
+3. **Connection Pooling Parameters (Staging Profile)**:
+   - `DB_POOL_SIZE = 5` (conserves staging database connections).
+   - `DB_MAX_OVERFLOW = 10` (permits burst traffic during concurrent tests).
+   - `DB_POOL_TIMEOUT = 30.0` (seconds to wait before raising pool timeout).
+   - `DB_POOL_RECYCLE = 1800` (recycles connections every 30 minutes to drop idle cloud sockets).
+   - `DB_POOL_PRE_PING = True` (detects dropped connections before issuing application queries).
+4. **Pre-Migration Safety Branch**:
+   - Prior to running the initial baseline migration on staging, create an instant zero-copy branch:
+     ```bash
+     neon branches create pre-staging-0c98aec98ce5
+     ```
+
+---
+
+### 13.3 Environment Variables & Secret Handling
+
+All secrets must be injected via host PaaS environment configuration. Never commit staging secrets to source control or container images.
+
+#### Backend Staging Configuration
+| Variable | Value / Pattern | Security & Operational Rule |
+| :--- | :--- | :--- |
+| `ENVIRONMENT` | `staging` | Triggers production validation rules in `Settings`: enforces high-entropy `SECRET_KEY`, sets refresh cookie `Secure=True`. |
+| `DATABASE_URL` | `postgresql+asyncpg://.../campusfix_staging?ssl=require` | Isolated staging PostgreSQL connection string with SSL required. Password auto-masked in diagnostic logs. |
+| `SECRET_KEY` | *(64-hex char string)* | Cryptographically generated via `openssl rand -hex 32`. Rejects default/placeholder tokens. |
+| `ALGORITHM` | `HS256` | JWT signature algorithm. |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `15` | Short-lived access token lifespan. |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Refresh token family maximum rotation lifespan. |
+| `ALLOWED_ORIGINS` | `https://staging.campusfix.university.edu` | Exact origin matching; no wildcards. |
+| `LOG_LEVEL` | `INFO` | Standard structured logging; credentials and tokens redacted. |
+
+#### Frontend Staging Configuration
+| Variable | Value | Operational Rule |
+| :--- | :--- | :--- |
+| `VITE_API_BASE_URL` | `/api/v1` | Compiled into static bundle; all browser API calls resolve relative to `window.location.origin`. |
+
+---
+
+### 13.4 Docker Image Build & Container Runtime Verification
+
+The staging deployment must verify both container images and runtime behaviors that cannot be tested on the local Windows development host:
+
+```bash
+# 1. Build and verify Backend Container
+docker build -t campusfix-backend:staging ./backend
+
+# 2. Build and verify Frontend Container
+docker build --build-arg VITE_API_BASE_URL=/api/v1 -t campusfix-frontend:staging ./frontend
+```
+
+#### Runtime Verification Checklist on Staging Host:
+1. **Unprivileged User Execution**:
+   - Backend container executes as UID `10001` (`campusfix`):
+     ```bash
+     docker run --rm campusfix-backend:staging id
+     # Expected: uid=10001(campusfix) gid=10001(campusfix)
+     ```
+   - Frontend container executes as UID `101` (`nginx`):
+     ```bash
+     docker run --rm campusfix-frontend:staging id
+     # Expected: uid=101(nginx) gid=101(nginx)
+     ```
+2. **Graceful Process Shutdown & Signal Handling**:
+   - Send `SIGTERM` to the running backend container:
+     ```bash
+     docker kill --signal=SIGTERM <backend_container_id>
+     ```
+   - Verify container exits cleanly with code 0 within 10 seconds, and logs indicate `close_db_engine()` completed connection pool disposal.
+3. **Inter-Container Network Resolution**:
+   - Verify Nginx container successfully resolves `backend:8000` over the Docker internal bridge network without connection refused errors.
+
+---
+
+### 13.5 Nginx Unified Gateway, HTTPS, DNS, and Browser Cookie Verification
+
+1. **DNS & Edge TLS Termination**:
+   - Staging DNS CNAME configured: `staging.campusfix.university.edu` pointing to PaaS edge ingress.
+   - PaaS Edge automatically issues and binds a valid Let's Encrypt / ACME TLS certificate for HTTPS on port 443.
+2. **Reverse Proxy Verification**:
+   - Request `GET https://staging.campusfix.university.edu/` returns `index.html` with headers:
+     - `Cache-Control: no-cache, no-store, must-revalidate`
+     - `X-Frame-Options: DENY`
+     - `X-Content-Type-Options: nosniff`
+   - Request `GET https://staging.campusfix.university.edu/assets/main-[hash].js` returns HTTP 200 with `Cache-Control: public, max-age=31536000, immutable`.
+   - Request `GET https://staging.campusfix.university.edu/healthz` proxies to backend and returns HTTP 200 `{"status": "healthy"}`.
+   - Request `GET https://staging.campusfix.university.edu/readyz` proxies to backend and returns HTTP 200 `{"status": "ready", "database": "connected"}`.
+3. **Browser Cookie Inspection (DevTools Verification)**:
+   - Log in as a student in Chrome / Firefox DevTools.
+   - Inspect `Application > Storage > Cookies > https://staging.campusfix.university.edu`:
+     - **Name**: `refresh_token`
+     - **Value**: High-entropy 64-character token
+     - **Domain**: `staging.campusfix.university.edu`
+     - **Path**: `/api/v1/auth`
+     - **Expires / Max-Age**: 7 days (604,800 seconds)
+     - **HttpOnly**: Checked / `true` (inaccessible via `document.cookie` in console)
+     - **Secure**: Checked / `true` (enforced via HTTPS)
+     - **SameSite**: `Lax`
+
+---
+
+### 13.6 Controlled Alembic Migration & Administrator Provisioning Sequence
+
+To eliminate race conditions and prevent startup lock contention, execution follows a strict 5-step sequence:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor DevOps as Staging Operator
+    participant CloudDB as Neon PostgreSQL (campusfix_staging)
+    participant Task as Isolated Release Runner
+    participant Web as FastAPI Web Service
+
+    DevOps->>CloudDB: 1. Create Zero-Copy Branch (pre-staging-0c98aec98ce5)
+    DevOps->>Task: 2. Execute Release Migration: alembic upgrade head
+    Task->>CloudDB: Apply baseline revision 0c98aec98ce5 (5 tables, 10 indexes)
+    Task-->>DevOps: Exit 0 (Migration Successful)
+    DevOps->>Web: 3. Verify Health: GET /readyz (returns 200 OK)
+    DevOps->>Task: 4. Interactive Bootstrap: python -m app.scripts.bootstrap_admin
+    Task-->>DevOps: Masked Prompt: Password (>=12 chars) + Confirmation
+    DevOps->>Task: Enters credentials via TTY
+    Task->>CloudDB: Insert ADMINISTRATOR user (Argon2id hash, role=ADMINISTRATOR)
+    Task-->>DevOps: Exit 0 (SUCCESS: Administrator account created)
+    DevOps->>Task: 5. Verify Idempotency: re-run bootstrap command
+    Task-->>DevOps: Exit 0 (ALREADY_ADMIN: Zero modifications)
+```
+
+#### Step 1: Pre-Migration Snapshot
+```bash
+neon branches create pre-staging-0c98aec98ce5
+```
+
+#### Step 2: Isolated Release Migration
+Execute the migration as an isolated task before web traffic begins:
+```bash
+alembic upgrade head
+```
+*Note: Never execute auto-migrations inside container startup scripts.*
+
+#### Step 3: Schema Verification
+Confirm current revision and database readiness:
+```bash
+alembic current
+# Expected output: 0c98aec98ce5 (head)
+
+curl -fsS https://staging.campusfix.university.edu/readyz
+# Expected output: {"status": "ready", "database": "connected"}
+```
+
+#### Step 4: Staging Administrator Bootstrapping
+Execute the verified CLI tool interactively with project-owner approval:
+```bash
+python -m app.scripts.bootstrap_admin \
+  --email "staging.admin@university.edu" \
+  --full-name "Staging Facilities Lead"
+```
+- CLI displays target environment (`staging`) and masked URL (`postgresql+asyncpg://***`).
+- Operator inputs masked password $\ge 12$ characters with confirmation.
+- User record created with Argon2id hash and `ADMINISTRATOR` role.
+
+#### Step 5: Idempotency Verification
+Re-run the exact same command:
+```bash
+python -m app.scripts.bootstrap_admin \
+  --email "staging.admin@university.edu" \
+  --full-name "Staging Facilities Lead"
+```
+- Returns `ALREADY_ADMIN` with exit code 0; confirms user profile and password remain strictly unmodified.
+
+---
+
+### 13.7 End-to-End Multi-Role Smoke Test Scenarios
+
+The staging smoke test validates all primary user personas using synthetic staging accounts:
+
+#### Scenario 1: Student Incident Lifecycle (`SCR-01`, `SCR-02`, `SCR-03`, `SCR-04`)
+1. **Account Registration**: Navigate to `/register`; register student `student.pilot@university.edu`. Verify password complexity enforcement ($\ge 8$ chars, uppercase, lowercase, digit). Verify automatic assignment of `STUDENT` role and immediate login.
+2. **Dashboard Verification**: Navigate to `/tickets`; verify initial empty state message renders cleanly.
+3. **Incident Filing**:
+   - Navigate to `/tickets/new`.
+   - Verify category dropdown dynamically populates from active categories.
+   - Enter Title: `"Water pipe leak in Science Hall 302"`.
+   - Select Category: `"Plumbing"`.
+   - Select Priority: `"HIGH"`.
+   - Enter Location: `"Science Hall, Room 302"`.
+   - Enter Description: `"Continuous leak under sink causing standing water on floor."` (verify character counter).
+   - Submit form.
+4. **Ticket Minting & Audit History**:
+   - Verify automatic navigation to `/tickets/:id`.
+   - Verify minted code matches format `CFX-YYYY-XXXXX` (e.g. `CFX-2026-00001`).
+   - Verify initial status badge renders `SUBMITTED` in neutral gray.
+   - Verify audit timeline displays initial creation event with student timestamp.
+
+#### Scenario 2: Staff Workbench Queue & Resolution (`SCR-05`, `SCR-06`, `SCR-04`)
+1. **Staff Provisioning**: Provision technician `staff.pilot@university.edu` via database script or promotion CLI (`--promote-existing`).
+2. **Workbench Navigation**: Log in as staff technician; navigate to `/staff/queue`.
+3. **Queue Inspection**:
+   - View "Unassigned Queue" tab; verify newly filed plumbing incident appears with `HIGH` priority pill.
+4. **Claim Ticket**:
+   - Click "Claim Ticket" action button.
+   - Verify ticket transitions to `ASSIGNED` and moves to "Assigned to Me" tab.
+5. **Start Work**:
+   - Open ticket details; click "Start Work".
+   - Verify status transitions to `IN_PROGRESS` (amber badge).
+   - Verify audit history records transition event and technician identity.
+6. **Ticket Resolution**:
+   - Click "Resolve Ticket".
+   - Resolution modal opens; enter resolution note: `"Replaced damaged compression valve and verified water pressure."` ($\ge 10$ characters required).
+   - Submit resolution; verify status transitions to `RESOLVED` (green badge).
+   - Verify high-visibility green resolution callout box renders on ticket detail page.
+
+#### Scenario 3: Administrator Category Management (`SCR-08`)
+1. **Admin Login**: Log in as `staging.admin@university.edu`.
+2. **Category Console**: Navigate to `/admin/categories`.
+3. **Add Category**:
+   - Click "Add Category".
+   - Enter Name: `"HVAC & Climate Control"`, Description: `"Heating, ventilation, and air conditioning issues."`
+   - Submit modal; verify new category appears in list with active status pill.
+4. **Duplicate Rejection**:
+   - Attempt to add `"HVAC & Climate Control"` again; verify modal traps HTTP 409 and displays inline conflict alert.
+5. **Category Deactivation**:
+   - Click "Deactivate" for the category.
+   - Confirmation dialog opens warning of student submission impact while preserving existing tickets.
+   - Confirm deactivation; category switches to inactive badge.
+   - Switch to student browser session; verify `"HVAC & Climate Control"` is omitted from the category dropdown on `/tickets/new`.
+6. **Category Reactivation**:
+   - Return to admin console; click "Activate"; confirm restoration.
+   - Verify category reappears in student dropdown.
+
+---
+
+### 13.8 Security & Edge-Case Verification Scenarios
+
+#### Scenario 4: Role-Based Access Control (RBAC) Isolation
+1. **Student Console Restriction**: In student session, attempt to navigate directly to `https://staging.campusfix.university.edu/admin/categories`.
+   - Verify frontend `RoleRoute` intercepts navigation and displays WCAG AA 403 Access Restricted alert banner.
+2. **Direct API RBAC Rejection**: Execute direct curl request using student access token:
+   ```bash
+   curl -X POST https://staging.campusfix.university.edu/api/v1/categories \
+     -H "Authorization: Bearer <student_token>" \
+     -H "Content-Type: application/json" \
+     -d '{"name": "Unauthorized Category"}'
+   ```
+   - Verify response returns HTTP 403 Forbidden with RFC 7807 problem detail.
+
+#### Scenario 5: IDOR Protection on Incident Data
+1. Register Student B (`student.b@university.edu`).
+2. Attempt to view Student A's ticket via `GET /api/v1/tickets/<student_a_ticket_uuid>` using Student B's bearer token.
+3. Verify response returns HTTP 404 Not Found (zero leakage of existence, metadata, or comments).
+
+#### Scenario 6: Ticket State Machine Transition Enforcement
+1. Attempt an illegal state transition (e.g. attempting to jump directly from `SUBMITTED` to `RESOLVED` bypassing assignment):
+   ```bash
+   curl -X POST https://staging.campusfix.university.edu/api/v1/tickets/<ticket_uuid>/transition \
+     -H "Authorization: Bearer <staff_token>" \
+     -H "Content-Type: application/json" \
+     -d '{"target_status": "RESOLVED", "notes": "Premature closure attempt", "expected_version": 1}'
+   ```
+2. Verify response returns HTTP 409 or 422 Invalid Transition error.
+
+#### Scenario 7: Optimistic Concurrency Control Collision (HTTP 409)
+1. Open the same ticket detail page in two separate browser windows (Window 1 and Window 2). Both hold `expected_version = 1`.
+2. In Window 1, technician claims the ticket $\to$ backend increments version to `2`.
+3. In Window 2 (still holding version `1`), technician attempts to update or resolve the ticket.
+4. Verify Window 2 traps HTTP 409 `CONCURRENCY_CONFLICT`, displays high-visibility warning banner: *"This ticket was modified by another user. Your changes were not applied."*, and automatically refetches the latest ticket state.
+
+#### Scenario 8: Refresh Token Rotation & Session Expiry
+1. Log in as student; capture access token and verify expiration is set to 15 minutes.
+2. Simulate access token expiration in browser client.
+3. Trigger an authenticated action (e.g., click Refresh on ticket dashboard).
+4. Verify browser Axios interceptor traps HTTP 401, invokes single-flight refresh mutex (`POST /api/v1/auth/refresh`), obtains new short-lived access token, and retries original request without user interruption.
+5. In browser DevTools, verify `refresh_token` cookie value rotated to a new token family member.
+
+#### Scenario 9: Complete Logout & Cookie Invalidation
+1. Click "Sign Out" in top navigation bar.
+2. Verify frontend calls `POST /api/v1/auth/logout`.
+3. Backend revokes active token family in `refresh_tokens` database table.
+4. Response header includes `Set-Cookie: refresh_token=; Max-Age=0; Path=/api/v1/auth; HttpOnly; Secure; SameSite=Lax`.
+5. Verify browser deletes the cookie immediately. Subsequent attempts to call `/api/v1/auth/refresh` return HTTP 401 Unauthorized and redirect to `/login`.
+
+---
+
+### 13.9 Observability, Health Checks, Logging, Backup & Disaster Recovery
+
+1. **Continuous Health Probes**:
+   - `GET /healthz` queried every 30 seconds by PaaS uptime monitor. Must return HTTP 200 `{"status": "healthy"}`.
+   - `GET /readyz` queried every 60 seconds. Must execute `SELECT 1` and return HTTP 200 `{"status": "ready", "database": "connected"}`.
+2. **Partition Tolerance Simulation**:
+   - Temporarily suspend database or rotate credentials $\to$ `/readyz` returns HTTP 503 `{"status": "unhealthy", "database": "unreachable"}` without exposing SQL connection strings or hostnames.
+   - Process liveness `/healthz` remains HTTP 200, preventing orchestration cascade restarts.
+3. **Structured Logging Hygiene**:
+   - Verify application logs format messages with UTC timestamps, log levels, and request paths.
+   - Verify passwords, authorization bearer headers, and refresh cookies never appear in log streams.
+4. **Disaster Recovery & Rollback Runbook**:
+   - **Schema Migration Rollback**: If migration fails or causes data corruption, `alembic downgrade` is **prohibited**. Restore the database immediately via Neon zero-copy branch:
+     ```bash
+     neon branches restore pre-staging-0c98aec98ce5
+     ```
+   - **Container Rollback**: If a newly deployed container fails health checks, redeploy the previous tagged Docker image (`campusfix-backend:staging-previous`).
+
+---
+
+### 13.10 Staging Release Gate & Explicit Acceptance Criteria
+
+Before recommending CampusFix for Phase 6 Production Release, the following 13 criteria must be 100% satisfied:
+
+- [ ] **Criteria 1 (Database Migration)**: Staging database migrated cleanly to baseline revision `0c98aec98ce5` via isolated release task.
+- [ ] **Criteria 2 (Admin Provisioning)**: Staging administrator provisioned via interactive `bootstrap_admin.py` with verified Argon2id hash and idempotency.
+- [ ] **Criteria 3 (Health Probes)**: `/healthz` and `/readyz` probes return HTTP 200 continuously across 24 hours of uptime.
+- [ ] **Criteria 4 (Student Incident Lifecycle)**: Student registration, login, incident filing (`CFX-YYYY-XXXXX`), and detail views verified live.
+- [ ] **Criteria 5 (Staff Workflow)**: Staff claiming (`ASSIGNED`), work execution (`IN_PROGRESS`), and note resolution ($\ge 10$ chars, `RESOLVED`) verified live.
+- [ ] **Criteria 6 (Admin Category Console)**: Administrator category creation, editing, deactivation (with student submission hiding), and reactivation verified live.
+- [ ] **Criteria 7 (Cookie Security in Browser)**: Refresh token cookie verified `HttpOnly=True`, `Secure=True`, `SameSite=Lax`, `Path=/api/v1/auth`, and `Max-Age=604800` in browser DevTools.
+- [ ] **Criteria 8 (Silent Token Refresh)**: Single-flight refresh mutex successfully refreshes expired sessions without user disruption.
+- [ ] **Criteria 9 (Logout Revocation)**: Logout revokes token family on database and zeroes browser cookie.
+- [ ] **Criteria 10 (RBAC & IDOR Boundaries)**: Strict 403 rejection on cross-role access and 404 rejection on cross-student ticket inspection verified live.
+- [ ] **Criteria 11 (Optimistic Locking)**: Concurrent edit collision traps HTTP 409 `CONCURRENCY_CONFLICT` with conflict alert banner.
+- [ ] **Criteria 12 (Zero Unhandled Errors)**: Zero 500 Internal Server Errors in staging application logs during smoke tests.
+- [ ] **Criteria 13 (Risk Register Updated)**: All runtime risks evaluated with real staging findings, and formal sign-off report submitted to Project Owner.
+
+---
+
+### 13.11 Decisions Requiring Project Owner Approval Before Execution
+
+The following decisions require explicit Project Owner sign-off before executing Phase 5.6:
+
+1. **Hosting Platform Selection**: Approve **Option A** (Render / Railway container compute + Neon Serverless PostgreSQL) or direct an alternative platform (e.g. institutional AWS VPC).
+2. **Staging Domain / DNS**: Confirm target staging URL (e.g. `https://staging.campusfix.university.edu` or PaaS-assigned domain `https://campusfix-staging.onrender.com`).
+3. **Staging Administrator Identity**: Confirm the authorized email address and display name for the initial staging administrator account.
+4. **Budget Authorization**: Approve estimated operational costs ($0.00 to ~$7.00/month) for staging infrastructure.
+
+> [!CAUTION]
+> **GOVERNANCE STOPPAGE ACTIVE**: Do not provision cloud resources, create databases, run migrations, execute the provisioning CLI, or build containers until the Project Owner reviews and approves this plan.
+
+
+
+
 

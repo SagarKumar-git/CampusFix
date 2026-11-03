@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { PriorityBadge, RoleBadge, StatusBadge } from '../../src/components/ui/Badge';
+import { ActiveStatusBadge, PriorityBadge, RoleBadge, StatusBadge } from '../../src/components/ui/Badge';
 import type { TicketPriority, TicketStatus, UserRole } from '../../src/types';
 
 describe('Badge Components', () => {
@@ -48,4 +48,15 @@ describe('Badge Components', () => {
       unmount();
     });
   });
+
+  it('renders active and inactive status badges correctly', () => {
+    const { unmount: unmountActive } = render(<ActiveStatusBadge isActive={true} />);
+    expect(screen.getByText('ACTIVE')).toBeInTheDocument();
+    unmountActive();
+
+    const { unmount: unmountInactive } = render(<ActiveStatusBadge isActive={false} />);
+    expect(screen.getByText('INACTIVE')).toBeInTheDocument();
+    unmountInactive();
+  });
 });
+

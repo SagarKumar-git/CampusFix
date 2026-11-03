@@ -1,0 +1,35 @@
+# ==============================================================================
+# CampusFix — Frontend Docker Ignore Rules
+# ==============================================================================
+
+# Secrets and environment files
+.env
+.env.*
+!.env.example
+
+# Local dependencies and build outputs
+node_modules/
+dist/
+dist-ssr/
+.vite/
+
+# Test caches, configurations and coverage reports
+tests/
+coverage/
+
+# Tooling and linter caches
+.eslintcache
+
+# Documentation
+docs/
+
+# Git and OS metadata
+.git/
+.gitignore
+.gitattributes
+.DS_Store
+Thumbs.db
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
