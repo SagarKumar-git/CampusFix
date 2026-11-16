@@ -375,20 +375,189 @@ python -m app.scripts.bootstrap_admin --email "staff@university.edu" --full-name
 
 For complete details regarding the sequential staging release runbook, environment selection, and test scenarios, see [PROJECT_STATUS.md §13](file:///c:/Sagar%20Project/CampusFix/docs/PROJECT_STATUS.md#13-phase-56-staging-deployment--release-verification-plan).
 
-### 8.1 Staging Architecture & Cost Projections
-- **Target Architecture**: Single-origin container stack (Nginx Gateway on port 8080 + FastAPI Backend on port 8000) deployed on Render Web Service or Railway, connected to Neon Serverless PostgreSQL (`campusfix_staging`) with SSL required (`?ssl=require`).
-- **Estimated Operational Costs (Planning Estimates Only)**:
-  - Neon Serverless PostgreSQL: $0.00 / month (Free tier).
-  - Container Compute (Web Service): $7.00 / month (Render Starter) or $5.00 / month (Railway Hobby).
-  - Ingress & TLS: $0.00 (Let's Encrypt automated TLS via PaaS Edge).
-  - **Total Estimated Staging Cost**: ~$0.00 to $7.00 / month.
+### 8.1 Owner-Approved Staging Architecture & Free-Tier Planning Baseline
 
-### 8.2 Execution Order & Rollback Protocol
-1. **Snapshot**: Create zero-copy branch `neon branches create pre-staging-0c98aec98ce5`.
-2. **Migration**: Run `alembic upgrade head` as an isolated pre-cutover release task. (No startup auto-migrations).
-3. **Health Verification**: Verify `GET /readyz` returns HTTP 200 `{"status": "ready", "database": "connected"}`.
-4. **Administrator Provisioning**: Execute `python -m app.scripts.bootstrap_admin --email "<staging_admin_email>" --full-name "<name>"` with interactive masked password.
-5. **Rollback**: If migration fails, execute `neon branches restore pre-staging-0c98aec98ce5`. `alembic downgrade` is strictly prohibited on populated staging databases.
+Following updated Project Owner review and direction, the staging hosting strategy has been aligned to a **Free-Tier Target ($0/month)** to deploy and validate CampusFix without recurring hosting costs:
+
+* **Immediate Objective**: Deploy and test CampusFix staging end-to-end on zero-cost infrastructure tiers without an active monthly hosting subscription.
+* **Compute Platform**: **Render Free Tier** (Web Services).
+* **Managed Persistence**: **Neon Serverless PostgreSQL (Free Tier)** (isolated database `campusfix_staging`, SSL enforced via `?ssl=require`).
+* **Ingress & Staging Domain**: **Default Render PaaS Domain** (e.g. `https://campusfix-staging.onrender.com`), utilizing Render's automated TLS certificate termination. No custom domain or institutional DNS CNAME records required.
+* **Proposed Initial Staging Administrator**: `kumarsagar77283@gmail.com` (Display Name: "Campus Facilities Lead").
+* **Monthly Hosting Budget**: **$0.00 / month target**.
+  > [!IMPORTANT]
+  > **Free-Tier Budget Disclaimer**: The $0.00/month target assumes operation entirely within provider free tiers (Render Free Web Services and Neon Free Serverless PostgreSQL). Actual charges may occur if usage exceeds free allocations (e.g., outbound bandwidth beyond Render's 5 GB/month allowance at $0.15/GB, build time over 500 minutes/month, or Neon storage exceeding 0.5 GB), or if provider terms, taxes, or pricing policies change. All quotas must be monitored during testing.
+* **Future Upgrade Path**: The project retains the explicit option to upgrade the compute tier to **Render Starter ($7.00/month)** in the future when persistent 24/7 uptime, zero cold starts, and native internal private networking are required.
+
+---
+
+### 8.2 Render Free Tier Technical Evaluation & Architecture Alternatives
+
+During pre-execution verification against Render's official infrastructure specifications, a key architectural restriction was identified:
+
+> [!WARNING]
+> **Render Free Tier Architectural Constraint**:
+> 1. **Private Services Have No Free Tier**: Render Private Services (services without public internet access, communicating strictly via internal DNS) require a paid instance type starting at **Starter ($7/month)**.
+> 2. **Free Web Services Cannot Receive Inbound Private Network Traffic**: On Render, Free Web Services can initiate outbound internal requests (e.g. to a database), but **cannot receive inbound traffic** over Render's private network from other services.
+
+Because a free private backend service is unavailable on Render, the backend cannot simply be addressed as `campusfix-backend-staging:8000` on the private network at $0/month.
+
+#### Evaluation of Safe Free-Tier Alternatives:
+
+| Architecture Option | Description | Security & Cookie Posture | Limitations & Operational Trade-offs |
+| :--- | :--- | :--- | :--- |
+| **Option 2: Single Unified Staging Container on One Render Free Web Service** *(Selected Baseline — Implemented in Phase 5.6.1)* | Nginx and FastAPI combined in a single unprivileged container ([`Dockerfile`](file:///c:/Sagar%20Project/CampusFix/Dockerfile)) deployed as ONE Render Free Web Service. Nginx listens on public dynamic `$PORT` (default: 8080) and reverse-proxies to FastAPI listening strictly on loopback `127.0.0.1:8000`. | **Maximum Isolation**: Backend listens only on loopback `127.0.0.1:8000` inside the container; **zero public internet exposure**. 100% same-origin cookie delivery (`HttpOnly=True`, `SameSite=Lax`, `Secure=True` via HTTPS). | Uses native lightweight Python supervisor ([`docker/entrypoint.py`](file:///c:/Sagar%20Project/CampusFix/docker/entrypoint.py)). Single ~50s cold start instead of cascading multi-service wake-up. |
+| **Option 1: Two Render Free Web Services with Gateway Ingress Protection** *(Alternative / Superseded Free-Tier Split)* | Frontend Nginx is a Free Web Service (`https://campusfix-staging.onrender.com`). Backend FastAPI is a Free Web Service (`https://campusfix-backend-staging.onrender.com`). Nginx proxies `/api/*` to the backend over HTTPS. | **Secure Same-Origin**: Browser communicates with Nginx origin, but backend is exposed to public internet requiring custom `X-Gateway-Secret` header validation and CORS filtering. | **Cascading Cold Starts**: Both services spin down after 15 min idle. Waking both can take 50–100s. Shared 750 free compute hours/month across the workspace. Superseded by Option 2. |
+| **Option 3: Future Upgrade to Render Starter ($7/mo)** | Frontend Web Service + Backend Private Service on Render's internal private network (`campusfix-backend-staging:8000`). | **Gold Standard**: Backend has no public URL; zero external attack surface; no cold starts; persistent 24/7 uptime. | Incurs US$7.00/month hosting fee. Retained as seamless upgrade path. |
+
+#### Selected Free-Tier Implementation Strategy (Option 2 — Unified Container):
+For the zero-cost ($0/month) staging deployment, **Option 2 (Single Unified Staging Container)** is the selected and implemented architecture:
+* **Packaging**: Single root [`Dockerfile`](file:///c:/Sagar%20Project/CampusFix/Dockerfile) utilizing multi-stage builds:
+  - Stage 1 (`frontend-builder`, `node:20-alpine`): Compiles TypeScript and builds Vite SPA assets to `/build/frontend/dist`.
+  - Stage 2 (`backend-builder`, `python:3.11-slim`): Installs minimal build tools to compile native wheels into isolated `/opt/venv`.
+  - Stage 3 (`runtime`, `python:3.11-slim`): Hardened runtime with Nginx and Uvicorn. Excludes all compilers, Node.js, and dev dependencies.
+* **Process Topology & Network Isolation**:
+  - **Nginx Web Server**: Serves React SPA static assets from `/usr/share/nginx/html` with SPA fallback (`try_files $uri $uri/ /index.html;`) and reverse-proxies `/api/` directly to FastAPI.
+  - **FastAPI ASGI Backend**: Runs via `uvicorn app.main:app --host 127.0.0.1 --port 8000`, bound **strictly to local loopback**. It has zero public internet exposure; all external ingress is funneled through Nginx.
+  - **Dynamic Port Ingress**: Render dynamically assigns `$PORT` at container runtime. At startup, the supervisor renders [`docker/nginx.conf.template`](file:///c:/Sagar%20Project/CampusFix/docker/nginx.conf.template) to `/tmp/nginx.conf` replacing `${PORT}` with `os.environ.get("PORT", "8080")`, verifies syntax via `nginx -t`, and binds Nginx to the assigned port.
+* **Non-Root Execution & Supervision**:
+  - Container executes under dedicated non-root user `campusfix:campusfix` (UID `10001`, GID `10001`).
+  - Temporary and cache paths (`/tmp/client_temp`, `/tmp/proxy_temp`, `/tmp/nginx.pid`) are writeable by UID 10001.
+  - Managed by [`docker/entrypoint.py`](file:///c:/Sagar%20Project/CampusFix/docker/entrypoint.py) (invoked via [`docker/entrypoint.sh`](file:///c:/Sagar%20Project/CampusFix/docker/entrypoint.sh)), providing:
+    1. Pre-flight health probe verification (`http://127.0.0.1:8000/healthz`) before starting Nginx.
+    2. Bounded graceful shutdown handling `SIGTERM` and `SIGINT` (10-second drain window before `SIGKILL`).
+    3. Fail-fast child monitoring: if either Uvicorn or Nginx crashes, the supervisor immediately terminates the surviving process and exits with the failure exit code to prevent zombie 502 states.
+* **Cookie & Security Posture**:
+  - Full first-party origin alignment under the single Render staging domain (`https://campusfix-staging.onrender.com`).
+  - Refresh cookie enforces `HttpOnly=True`, `SameSite=Lax`, `Path=/api/v1/auth`, and `Secure=True` in staging and production (`settings.is_cookie_secure`).
+* **Superseded Option 1 Reference**:
+  - The split two-service architecture (separate Frontend Web Service + Backend Web Service with `X-Gateway-Secret`) remains documented above as an alternative/fallback, but is superseded by the unified container to eliminate dual cold starts and backend public IP exposure.
+
+---
+
+### 8.3 Detailed Free-Tier Constraints & Operational Limitations
+
+Operating on Render and Neon free tiers introduces operational characteristics that must be accounted for during smoke testing:
+
+1. **Service Idling & Cold Starts (Render Free Web Services)**:
+   * Free Web Services automatically spin down ("sleep") after **15 minutes of inactivity**.
+   * When an HTTP request arrives at a sleeping service, Render wakes it up, causing an initial request latency of **50 to 100 seconds**.
+   * In a two-service topology (Frontend + Backend), an initial user visit triggers a cascading wake-up (frontend wakes, then backend wakes), requiring patience during the first test interaction.
+2. **Compute & Memory Quotas (Render Free Tier)**:
+   * Each free service is limited to **512 MB RAM** and **0.1 CPU core**.
+   * Memory leaks or heavy concurrent operations that exceed 512 MB will trigger out-of-memory (OOM) container termination.
+   * Total free compute allowance is **750 hours/month per workspace**. Because free services sleep when idle, intermittent staging test sessions consume only a fraction of this limit. Continuous 24/7 uptime is not supported on the free tier.
+3. **Bandwidth & Build Quotas (Render Free Tier)**:
+   * **Outbound Bandwidth**: 5 GB/month included free ($0.15/GB overage).
+   * **Build Minutes**: 500 pipeline minutes/month included.
+4. **Interactive Shell Restrictions**:
+   * Render Free tier does **not support SSH or interactive shell access** (`render exec`). All commands must run as web services, release commands, or one-off tasks.
+5. **Database Quotas (Neon Free Tier)**:
+   * **Storage**: 0.5 GB maximum active data storage.
+   * **Compute**: Shared vCPU with automatic idle suspension after 5 minutes of inactivity (resumes in <500ms on incoming queries).
+   * **Connections**: Up to 100 direct connections (10,000 via PgBouncer).
+   * **Backups**: Continuous WAL archiving with 7-day Point-in-Time Recovery (PITR) and instant zero-copy branching included free.
+
+---
+
+### 8.4 Review of Vercel Edge Rewrites vs. Selected Render Gateway
+
+In [frontend/vercel.json](file:///c:/Sagar%20Project/CampusFix/frontend/vercel.json), serverless edge rewrites are defined:
+```json
+{
+  "source": "/api/:path*",
+  "destination": "https://api.campusfix.university.edu/api/:path*"
+}
+```
+
+**Why Vercel is NOT the Selected Staging Ingress**:
+1. **Hardcoded Destination**: The rewrite destination hardcodes `https://api.campusfix.university.edu`, which is the intended future production domain and cannot resolve a staging PaaS backend.
+2. **Multi-Vendor Operational Overhead**: A hybrid Vercel (frontend) + Render (backend) topology splits staging across two independent vendor dashboards, requiring double credential management, disparate monitoring, and dual-billing tracking.
+3. **Double-Hop Internet Latency & Timeouts**: Requests from the client must traverse the public internet to Vercel's edge, hop across the open internet again to the backend PaaS, and return. Serverless edge workers impose strict execution limits (10s–30s on standard tiers), risking early termination of operational requests.
+4. **Public Exposure Requirement**: Under Vercel edge rewrites, the backend compute must expose a public internet URL for Vercel to proxy to, increasing the attack surface.
+5. **Single-Origin Superiority of Render**: By selecting Render with an Nginx gateway, proxy timeouts are fully governed by Nginx (`proxy_read_timeout 60s`), and all assets and API routes share a single Render-managed domain (`https://campusfix-staging.onrender.com`).
+
+---
+
+### 8.5 Staging Administrator Provisioning Protocol (Safety Guard Reconciliation)
+
+The existing CLI tool ([backend/app/scripts/bootstrap_admin.py](file:///c:/Sagar%20Project/CampusFix/backend/app/scripts/bootstrap_admin.py)) enforces a strict database target safety check (`check_database_target_safety()`, lines 87–118) that restricts execution strictly to local loopback hosts (`localhost`, `127.0.0.1`, `::1`).
+
+**Security Constraints & Principles**:
+* The safety check intentionally blocks remote hosts to prevent accidental execution against cloud environments.
+* **No Weakening or Bypasses**: No backdoor flags (`--force`, `--skip-safety`, `--yes`) will be introduced.
+* **No False Tunnel Assumptions**: An SSH or proxy tunnel binding a remote Neon host to `127.0.0.1` does *not* make a remote database safe—it simply spoofs the loopback check while leaving the remote database vulnerable to operator error or targeted mistakes.
+
+**Secure, Explicit, Independently Verifiable Staging Bootstrap Procedure**:
+When the staging database is provisioned and ready for initial administration:
+1. **Explicit Owner Authorization Token / Sign-Off**: The Project Owner must issue an explicit, recorded approval for provisioning the staging admin against `campusfix_staging`.
+2. **Interactive Isolated Runner**: The script must be executed via an interactive, authenticated staging runner where `sys.stdin.isatty()` is true for masked double-entry password input via `getpass.getpass()`.
+3. **Verified Staging Environment Guard**:
+   * Prior to Phase 5.6 execution, a controlled, auditable authorization protocol will be reviewed: execution against non-loopback hosts will be permitted **strictly and exclusively** when:
+     1. `settings.is_production` is verified `False` (`ENVIRONMENT=staging`).
+     2. The target database name extracted from `DATABASE_URL` matches **exactly `campusfix_staging`**.
+     3. An explicit command-line confirmation flag (e.g. `--allow-staging-db`) is supplied AND the operator interactively confirms the displayed target database hostname and masked URL.
+4. **Preserved Invariants**:
+   * Zero plaintext passwords in environment variables, arguments, or logs.
+   * Mandatory password complexity ($\ge 12$ chars, uppercase, lowercase, digit, symbol, not in blacklist).
+   * Argon2id hashing with standard RFC 9106 parameters.
+   * Target admin email: `kumarsagar77283@gmail.com`.
+   * Complete immutability of existing administrator records (`ALREADY_ADMIN` idempotent exit).
+   * Guaranteed database engine disposal in a `finally` block.
+
+---
+
+### 8.6 Future Staging Deployment & Execution Sequence
+
+When Phase 5.6 deployment authorization is granted, execution will strictly follow this 7-step sequence:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Owner as Project Owner
+    actor Operator as Staging Operator
+    participant Neon as Neon PostgreSQL
+    participant Render as Render Platform
+    participant App as CampusFix Application
+
+    Owner->>Operator: 1. Formal Deployment Authorization ($0 Target)
+    Operator->>Neon: 2. Create isolated free database: campusfix_staging
+    Operator->>Neon: 3. Create baseline safety branch: pre-staging-0c98aec98ce5
+    Operator->>Render: 4. Execute Release Task: alembic upgrade head
+    Render->>Neon: Apply revision 0c98aec98ce5 (5 tables, 10 indexes)
+    Operator->>Render: 5. Verify DB readiness: GET /readyz (returns 200 OK)
+    Operator->>Render: 6. Interactive Bootstrap CLI (kumarsagar77283@gmail.com)
+    Operator->>Render: 7. Deploy Unified Free Web Service (Single Container running Nginx + FastAPI on loopback)
+    Operator->>App: 8. Execute Multi-Role Smoke Test Suite on https://campusfix-staging.onrender.com
+```
+
+1. **Database Provisioning**: Create isolated database `campusfix_staging` on Neon Free Tier with TLS enforced (`?ssl=require`).
+2. **Pre-Migration Safety Branch**: Create instant zero-copy branch `neon branches create pre-staging-0c98aec98ce5`.
+3. **Isolated Release Task Migration**: Apply Alembic schema migrations via a one-off release command (`alembic upgrade head`). Zero automatic startup migrations.
+4. **Health Verification**: Confirm database connectivity via `GET /readyz` (returns HTTP 200 `{"status": "ready", "database": "connected"}`).
+5. **Authorized Admin Provisioning**: Execute interactive `bootstrap_admin.py` for `kumarsagar77283@gmail.com` with masked password entry. Re-run to verify `ALREADY_ADMIN` idempotency.
+6. **Unified Container Service Deployment**: Launch Render Free Web Service running the unified multi-stage container ([`Dockerfile`](file:///c:/Sagar%20Project/CampusFix/Dockerfile)) with Nginx listening on dynamic `$PORT` and reverse-proxying `/api/` to FastAPI on loopback `127.0.0.1:8000`.
+7. **End-to-End Verification**: Execute live smoke test suite on the default Render URL, DevTools cookie inspection, RBAC validation, and physical accessibility evaluation. Account for initial 50s cold start delay on sleeping free instance.
+
+---
+
+### 8.7 Outstanding Operational & Architecture Risks (Free-Tier Staging Register)
+
+All runtime risks remain actively tracked and must be verified during staging smoke testing:
+
+1. **Service Sleep & Unified Cold Start**: The Render Free Web Service sleeps after 15 min idle. The unified single-container architecture ensures frontend and backend wake up together on initial visit (single ~50s spin-up window, eliminating cascading two-service delays).
+2. **Backend Network Isolation**: Resolved. By packaging Nginx and FastAPI into a single container, FastAPI binds strictly to loopback `127.0.0.1:8000`. Zero public backend URLs exist, entirely mitigating external backend ingress vulnerabilities.
+3. **Resource Quota Enforcement**: Memory must remain below 512 MB to prevent OOM termination. Total active hours must remain within 750 hrs/month, bandwidth under 5 GB/month, and database storage under Neon's 0.5 GB quota.
+4. **Future Starter Tier Upgrade Readiness**: If staging testing requires zero cold starts, continuous 24/7 uptime, or native Render Private Services, upgrading the Web Service to Render Starter ($7/mo) remains available without application refactoring.
+5. **Validated Docker Runtime**: Container multi-stage build (`Dockerfile`), unprivileged non-root execution (`campusfix` UID `10001`), dynamic `$PORT` substitution, `/healthz` & `/readyz` routing, fail-fast termination, and `SIGTERM` graceful shutdown (10s drain window) were successfully tested and validated on Docker Desktop in Phase 5.6.1.
+6. **HTTPS & Browser Cookie Flow**: Refresh cookie enforces `Secure=True`, `HttpOnly=True`, `SameSite=Lax`, and `Path=/api/v1/auth` across both production and staging (`settings.is_cookie_secure`). Render automated Let's Encrypt TLS terminates at the edge and satisfies all modern browser cookie policies.
+7. **Manual Accessibility Verification**: Screen-reader pronunciation (NVDA/VoiceOver), 400% zoom reflow, and physical touch-target verification remain pending physical evaluation during the staging pilot.
+8. **Backend Scope Discrepancy Tracking**:
+   * *Ticket Cancellation*: `ticket_fsm.py` line 275 permits admin cancellation if `is_creator`, while frontend strictly restricts cancellation to student creators.
+   * *Omitted Admin Endpoints*: `/api/v1/admin/dashboard/metrics` and `/api/v1/admin/users` remain deferred per backend scope freeze; frontend safely routes to `/admin/categories`.
+
+---
 
 > [!CAUTION]
-> **GOVERNANCE BOUNDARY**: Phase 5.6 execution is currently halted. Do not provision infrastructure, run migrations, or deploy containers without explicit Project Owner sign-off.
+> **GOVERNANCE BOUNDARY MAINTAINED — PLANNING ALIGNMENT ONLY**:
+> Phase 5.6 execution remains **STOPPED**. No cloud resources or databases have been provisioned, no containers built or deployed, and no application code modified. Deployment will begin only upon explicit Project Owner authorization to proceed.

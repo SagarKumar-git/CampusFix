@@ -85,3 +85,37 @@ def test_production_rejects_short_secret():
             SECRET_KEY="short_production_secret_key_12345678901234567890",
         )
     assert "Production environment requires a strong, random SECRET_KEY" in str(exc_info.value)
+
+
+def test_is_cookie_secure_auto_detection():
+    """Verifies that cookie Secure flag is auto-detected as True in production & staging, False in dev."""
+    dev_cfg = Settings(ENVIRONMENT="development")
+    assert dev_cfg.is_cookie_secure is False
+
+    staging_cfg = Settings(ENVIRONMENT="staging")
+    assert staging_cfg.is_cookie_secure is True
+
+    prod_cfg = Settings(
+        ENVIRONMENT="production",
+        SECRET_KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    )
+    assert prod_cfg.is_cookie_secure is True
+
+
+def test_is_cookie_secure_explicit_override():
+    """Verifies explicit COOKIE_SECURE setting overrides environment auto-detection."""
+    # Force Secure=True in development
+    forced_dev_cfg = Settings(ENVIRONMENT="development", COOKIE_SECURE=True)
+    assert forced_dev_cfg.is_cookie_secure is True
+
+    # Force Secure=False in staging
+    forced_staging_cfg = Settings(ENVIRONMENT="staging", COOKIE_SECURE=False)
+    assert forced_staging_cfg.is_cookie_secure is False
+
+    # Force Secure=False in production (e.g. for non-TLS test harness)
+    forced_prod_cfg = Settings(
+        ENVIRONMENT="production",
+        SECRET_KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        COOKIE_SECURE=False,
+    )
+    assert forced_prod_cfg.is_cookie_secure is False

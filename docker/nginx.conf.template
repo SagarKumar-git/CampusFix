@@ -1,0 +1,192 @@
+# ==============================================================================
+# CampusFix — Unified Container Nginx Configuration Template
+# ==============================================================================
+# Unprivileged Nginx configuration for single-container deployment (Render Free Tier).
+#
+# Key Characteristics:
+#   - Listens on dynamic ${PORT} specified at runtime by Render.
+#   - Serves React SPA static assets from /usr/share/nginx/html.
+#   - Reverse-proxies /api/* directly to local loopback FastAPI (127.0.0.1:8000).
+#   - Proxies /healthz (liveness) and /readyz (readiness) to backend.
+#   - Provides direct /health probe for container web server health.
+#   - Preserves first-party cookie semantics (SameSite=Lax, HttpOnly, Secure).
+#   - All temporary paths and PID configured under /tmp for non-root execution.
+# ==============================================================================
+
+worker_processes auto;
+pid /tmp/nginx.pid;
+error_log /var/log/nginx/error.log warn;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    # --------------------------------------------------------------------------
+    # Temporary paths for unprivileged execution (writeable by non-root UID)
+    # --------------------------------------------------------------------------
+    client_body_temp_path /tmp/client_temp;
+    proxy_temp_path /tmp/proxy_temp;
+    fastcgi_temp_path /tmp/fastcgi_temp;
+    uwsgi_temp_path /tmp/uwsgi_temp;
+    scgi_temp_path /tmp/scgi_temp;
+
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log /var/log/nginx/access.log main;
+
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+
+    # --------------------------------------------------------------------------
+    # Backend Upstream (Local Loopback FastAPI Service)
+    # --------------------------------------------------------------------------
+    upstream backend_api {
+        server 127.0.0.1:8000;
+        keepalive 32;
+    }
+
+    server {
+        listen ${PORT} default_server;
+        listen [::]:${PORT} default_server;
+
+        server_name _;
+        root /usr/share/nginx/html;
+        index index.html;
+
+        # ----------------------------------------------------------------------
+        # Compression (Gzip)
+        # ----------------------------------------------------------------------
+        gzip on;
+        gzip_vary on;
+        gzip_proxied any;
+        gzip_comp_level 6;
+        gzip_min_length 1000;
+        gzip_types
+            text/plain
+            text/css
+            text/xml
+            text/javascript
+            application/json
+            application/javascript
+            application/x-javascript
+            application/xml
+            application/xml+rss
+            image/svg+xml;
+
+        # ----------------------------------------------------------------------
+        # Security Headers (Global)
+        # ----------------------------------------------------------------------
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+
+        # ----------------------------------------------------------------------
+        # Health Probes
+        # ----------------------------------------------------------------------
+        # Web server direct liveness probe
+        location = /health {
+            access_log off;
+            default_type text/plain;
+            return 200 "healthy\n";
+        }
+
+        # Backend FastAPI liveness probe
+        location = /healthz {
+            proxy_pass http://backend_api/healthz;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_connect_timeout 5s;
+            proxy_read_timeout 5s;
+        }
+
+        # Backend FastAPI readiness probe
+        location = /readyz {
+            proxy_pass http://backend_api/readyz;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_connect_timeout 5s;
+            proxy_read_timeout 5s;
+        }
+
+        # ----------------------------------------------------------------------
+        # Same-Origin API Reverse Proxy (/api/* -> FastAPI backend on 127.0.0.1:8000)
+        # ----------------------------------------------------------------------
+        location /api/ {
+            proxy_pass http://backend_api;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+
+            # Forward client identification headers
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header X-Forwarded-Port $server_port;
+
+            # Forward cookies and response headers without attenuation
+            proxy_pass_header Set-Cookie;
+            proxy_pass_request_headers on;
+
+            # Buffer settings for handling JWT and JSON payload envelopes
+            proxy_buffer_size 128k;
+            proxy_buffers 4 256k;
+            proxy_busy_buffers_size 256k;
+
+            # Gateway timeouts
+            proxy_connect_timeout 30s;
+            proxy_read_timeout 60s;
+            proxy_send_timeout 60s;
+        }
+
+        # ----------------------------------------------------------------------
+        # Static Assets with Content Hashes (Immutable 1-Year Cache)
+        # ----------------------------------------------------------------------
+        location /assets/ {
+            expires 1y;
+            add_header Cache-Control "public, max-age=31536000, immutable";
+            access_log off;
+        }
+
+        # ----------------------------------------------------------------------
+        # Single Page Application (SPA) Fallback Routing
+        # ----------------------------------------------------------------------
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+
+        # ----------------------------------------------------------------------
+        # Do Not Cache HTML Entrypoint (Always Revalidate Shell)
+        # ----------------------------------------------------------------------
+        location = /index.html {
+            expires -1;
+            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0";
+        }
+
+        # ----------------------------------------------------------------------
+        # Error Pages
+        # ----------------------------------------------------------------------
+        error_page 500 502 503 504 /50x.html;
+        location = /50x.html {
+            root /usr/share/nginx/html;
+        }
+    }
+}

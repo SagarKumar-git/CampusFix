@@ -91,6 +91,13 @@ class Settings(BaseSettings):
         ge=1,
         description="Lifetime of refresh token cookie in days",
     )
+    COOKIE_SECURE: bool | None = Field(
+        default=None,
+        description=(
+            "Whether to enforce the Secure flag on refresh cookies. "
+            "If None, auto-detected from ENVIRONMENT (True in production and staging, False in development)."
+        ),
+    )
 
     # CORS
     ALLOWED_ORIGINS: str = Field(
@@ -188,6 +195,18 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         """Returns True if the application is executing in production mode."""
         return self.ENVIRONMENT.lower() == "production"
+
+    @property
+    def is_cookie_secure(self) -> bool:
+        """Determines whether refresh cookies require the Secure attribute (HTTPS).
+
+        If COOKIE_SECURE is explicitly configured (True or False), that value takes precedence.
+        Otherwise, Secure=True is enforced in production and staging environments,
+        while defaulting to False in development/testing to allow local HTTP operation.
+        """
+        if self.COOKIE_SECURE is not None:
+            return self.COOKIE_SECURE
+        return self.ENVIRONMENT.lower() in ("production", "staging")
 
 
 @lru_cache

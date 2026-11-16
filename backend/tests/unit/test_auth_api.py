@@ -208,6 +208,107 @@ async def test_login_success(client: AsyncClient, sample_student: User):
         assert "HttpOnly" in set_cookie
         assert "Path=/api/v1/auth" in set_cookie
         assert "SameSite=lax" in set_cookie or "samesite=lax" in set_cookie
+        assert "secure" not in set_cookie.lower()
+
+
+@pytest.mark.asyncio
+async def test_login_cookie_secure_in_staging_and_production(
+    client: AsyncClient, sample_student: User
+):
+    """POST /auth/login sets Secure=True on refresh cookie in staging and production environments."""
+    mock_login_result = LoginResult(
+        access_token="mock_access_jwt_string",
+        raw_refresh_token="mock_refresh_token_string",
+        user=sample_student,
+    )
+
+    with patch("app.api.v1.auth.AuthService.login", new_callable=AsyncMock) as mock_login:
+        mock_login.return_value = mock_login_result
+
+        payload = {
+            "email": "jane.doe@university.edu",
+            "password": "SecurePassword123!",
+        }
+
+        # Staging test: ENVIRONMENT=staging auto-enables Secure=True
+        with (
+            patch.object(settings, "ENVIRONMENT", "staging"),
+            patch.object(settings, "COOKIE_SECURE", None),
+        ):
+            assert settings.is_cookie_secure is True
+            response_staging = await client.post("/api/v1/auth/login", json=payload)
+            assert response_staging.status_code == 200
+            set_cookie_staging = response_staging.headers.get("set-cookie")
+            assert set_cookie_staging is not None
+            assert "secure" in set_cookie_staging.lower()
+            assert "httponly" in set_cookie_staging.lower()
+            assert "samesite=lax" in set_cookie_staging.lower()
+            assert "path=/api/v1/auth" in set_cookie_staging.lower()
+
+        # Production test: ENVIRONMENT=production auto-enables Secure=True
+        with (
+            patch.object(settings, "ENVIRONMENT", "production"),
+            patch.object(settings, "COOKIE_SECURE", None),
+        ):
+            assert settings.is_cookie_secure is True
+            response_prod = await client.post("/api/v1/auth/login", json=payload)
+            assert response_prod.status_code == 200
+            set_cookie_prod = response_prod.headers.get("set-cookie")
+            assert set_cookie_prod is not None
+            assert "secure" in set_cookie_prod.lower()
+
+        # Explicit override test: COOKIE_SECURE=True in development
+        with (
+            patch.object(settings, "ENVIRONMENT", "development"),
+            patch.object(settings, "COOKIE_SECURE", True),
+        ):
+            assert settings.is_cookie_secure is True
+            response_override = await client.post("/api/v1/auth/login", json=payload)
+            assert response_override.status_code == 200
+            set_cookie_override = response_override.headers.get("set-cookie")
+            assert "secure" in set_cookie_override.lower()
+
+
+@pytest.mark.asyncio
+async def test_logout_clears_cookie_with_secure_flag_in_staging(
+    client: AsyncClient, sample_student: User
+):
+    """POST /auth/logout clears refresh cookie and preserves Secure=True in staging."""
+    token = create_access_token(
+        user_id=sample_student.id,
+        email=sample_student.email,
+        role=sample_student.role,
+    )
+
+    with (
+        patch(
+            "app.api.deps.AuthService.get_user_by_id",
+            new_callable=AsyncMock,
+        ) as mock_get_user,
+        patch(
+            "app.api.v1.auth.AuthService.logout",
+            new_callable=AsyncMock,
+        ) as mock_logout,
+    ):
+        mock_get_user.return_value = sample_student
+        mock_logout.return_value = True
+
+        with (
+            patch.object(settings, "ENVIRONMENT", "staging"),
+            patch.object(settings, "COOKIE_SECURE", None),
+        ):
+            client.cookies.set("refresh_token", "active_refresh_cookie")
+            response = await client.post(
+                "/api/v1/auth/logout",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert response.status_code == 200
+            set_cookie = response.headers.get("set-cookie")
+            assert set_cookie is not None
+            assert "max-age=0" in set_cookie.lower()
+            assert "secure" in set_cookie.lower()
+            assert "httponly" in set_cookie.lower()
+            assert "path=/api/v1/auth" in set_cookie.lower()
 
 
 @pytest.mark.asyncio
